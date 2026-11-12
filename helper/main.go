@@ -16,7 +16,7 @@ import (
 	"sync"
 )
 
-const version = "1.0.0"
+const version = "1.0.1"
 
 type request struct {
 	ID        int             `json:"id"`
