@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "M-Link — Твой обход ограничений",
   "short_name": "M-Link",
-  "version": "1.0",
-  "description": "Клиент для твоих VPN-подписок и узлов: VLESS, Reality, VMess, Trojan, Shadowsocks, Hysteria2, TUIC.",
+  "version": "1.0.1",
+  "description": "Подключай браузер к своим VPN-подпискам: выбирай сервер, проверяй скорость и решай, какие сайты открывать через VPN.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2t4H0Z2cMrSnkpbLA9q/ACSF/SmsGSM97zRxa5ebQ1TzUflsoDQ2E4+vBsUY/uP0hpT/nbPK59QfmYbF0SBXKkNsZvWeyx/nHpcQVzGxbDVp9VsE6IrE79Wn3YChRKBmiht0i2HlYjG1hNTuU9RpdExYuyVwMbe8JcPbfErIaGoaIS1G+aSFEfYIln3wRjxcjZxqOr3ZM8TyI5KOCpfgdb/SSgIO4FNZDQE5cIxDzzknPxhT7F62la5yF7ZRi4ZvHeSLCoYxKbGWaCwpm5sDbL9gWPvTLwwfekDUTo0rMDD3OnmMeFWC50V/4I/rjIYEukcSwhniuKsG4Gm2EioW4QIDAQAB",
   "minimum_chrome_version": "116",
   "permissions": [
