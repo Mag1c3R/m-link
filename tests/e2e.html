@@ -1,0 +1,34 @@
+<!doctype html><meta charset="utf-8"><title>M-Link e2e</title>
+<link rel="stylesheet" href="../extension/popup.css">
+<style>html{background:#888}body{margin:20px auto;box-shadow:0 10px 40px rgba(0,0,0,.4)}</style>
+<script type="module">
+// Сквозной стенд: настоящие background.js и popup.js + настоящий помощник и sing-box через tests/serve.py.
+// Запуск: MLINK_TEST_HOME=<пустая папка> python3 tests/serve.py 8768, затем открыть /tests/e2e.html
+//   ?nohelper=1 — начать без помощника (включить: __stub.helperAvailable = true)
+//   ?os=win|mac|linux — какая система показывается в карточке установки
+import { installChromeStub } from './chrome-stub.js';
+const q = new URLSearchParams(location.search);
+
+// Удалённый конфиг берём из локального файла репозитория, а не с GitHub.
+const realFetch = window.fetch.bind(window);
+window.fetch = (url, opts) => (String(url).includes('raw.githubusercontent.com') && String(url).endsWith('/remote-config.json')
+  ? realFetch('../remote-config.json', { cache: 'no-store' })
+  : realFetch(url, opts));
+
+const stub = await installChromeStub({
+  helperAvailable: !q.get('nohelper'),
+  platform: { os: q.get('os') || 'mac', arch: q.get('arch') || 'arm64' },
+  local: q.get('port') ? { settings: { port: Number(q.get('port')) } } : {},
+});
+await import('../extension/background.js');
+stub.fireInstalled();
+
+const html = await (await fetch('../extension/popup.html')).text();
+const doc = new DOMParser().parseFromString(html, 'text/html');
+doc.querySelectorAll('script').forEach((s) => s.remove());
+doc.querySelectorAll('img').forEach((i) => i.setAttribute('src', '../extension/' + i.getAttribute('src')));
+document.body.innerHTML = doc.body.innerHTML;
+await import('../extension/popup.js');
+document.documentElement.dataset.ready = '1';
+</script>
+<body></body>

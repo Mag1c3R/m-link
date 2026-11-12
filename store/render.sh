@@ -14,7 +14,7 @@ trap 'kill $SRV 2>/dev/null; rm -rf "$PROFILE"' EXIT
 sleep 1
 
 shot() { # kind width height file
-  "$CHROME" --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
+  "$CHROME" --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=1 --force-dark-mode \
     --user-data-dir="$PROFILE" --window-size="$2,$3" --virtual-time-budget=5000 \
     --screenshot="$OUT/$4.raw.png" "http://localhost:$PORT/store/art.html?kind=$1" >/dev/null 2>&1
   # Магазин просит PNG без альфа-канала: переводим в 24-битный RGB.
