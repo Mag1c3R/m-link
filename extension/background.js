@@ -25,6 +25,7 @@ const DEFAULTS = {
 async function loadState() {
   const s = await chrome.storage.local.get(DEFAULTS);
   s.settings = { ...DEFAULT_SETTINGS, ...s.settings };
+  if (s.settings.userAgent === 'M-Client/0.1') s.settings.userAgent = BRAND.userAgent; // старое имя по умолчанию
   return s;
 }
 

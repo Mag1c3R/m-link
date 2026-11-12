@@ -18,7 +18,7 @@ const local = q.get('empty') ? { subs: [], manual: [] } : {
   subs: [{ id: 's1', url: 'https://sub.example/abc', name: 'M-VPN Premium', nodes: sub, updatedAt: Date.now() - 3600e3,
     userinfo: { upload: 2.1e9, download: 14.3e9, total: 100 * 2 ** 30, expire: 1798761600 } }],
   manual, selectedId: sub[0].id, latency: lat,
-  settings: { mode: 'except', exceptList: 'ru\nsu\nрф\nby', onlyList: '', port: 10808, updateHours: 12, userAgent: 'M-Client/0.1' },
+  settings: { mode: 'except', exceptList: 'ru\nsu\nрф\nby', onlyList: '', port: 10808, updateHours: 12, userAgent: 'M-Link/0.1' },
 };
 const st = q.get('state') || 'off';
 const session = { status: st === 'on' ? { state: 'on', nodeName: sub[0].name, since: Date.now() - 754e3 }

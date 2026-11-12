@@ -1,5 +1,5 @@
 #!/bin/sh
-# Установка помощника M-Client для macOS и Linux.
+# Установка помощника M-Link для macOS и Linux.
 # Запуск: sh install.sh [ID_расширения]
 set -e
 HOST_NAME="com.mclient.helper"
@@ -51,7 +51,7 @@ fi
 MANIFEST=$(cat <<JSON
 {
   "name": "$HOST_NAME",
-  "description": "M-Client helper",
+  "description": "M-Link helper",
   "path": "$DEST/m-client-helper",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://$EXT_ID/"]

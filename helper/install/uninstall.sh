@@ -1,5 +1,5 @@
 #!/bin/sh
-# Удаление помощника M-Client (macOS и Linux).
+# Удаление помощника M-Link (macOS и Linux).
 HOST_NAME="com.mclient.helper"
 case "$(uname -s)" in
   Darwin) DEST="$HOME/Library/Application Support/MClient"; BASE="$HOME/Library/Application Support" ;;

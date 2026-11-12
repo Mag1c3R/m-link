@@ -1,4 +1,4 @@
-// M-Client helper: native messaging host для расширения.
+// M-Link helper: native messaging host для расширения.
 // Запускает sing-box с конфигом от расширения, следит за процессом и меряет задержку узлов.
 package main
 

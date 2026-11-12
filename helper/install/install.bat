@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-rem Установка помощника M-Client для Windows. Запуск двойным щелчком.
+rem Установка помощника M-Link для Windows. Запуск двойным щелчком.
 set HOST_NAME=com.mclient.helper
 set EXT_ID=aghdgobidfiogibjlpfhdegieiaiakgm
 if not "%~1"=="" set EXT_ID=%~1
@@ -15,7 +15,7 @@ rem На Windows путь в манифесте может быть относи
 (
   echo {
   echo   "name": "%HOST_NAME%",
-  echo   "description": "M-Client helper",
+  echo   "description": "M-Link helper",
   echo   "path": "m-client-helper.exe",
   echo   "type": "stdio",
   echo   "allowed_origins": ["chrome-extension://%EXT_ID%/"]

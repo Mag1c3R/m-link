@@ -1,9 +1,9 @@
 // Всё, что относится к бренду и рекламе, собрано здесь. Замени ссылки на свои.
 export const BRAND = {
-  name: 'M-Client',
+  name: 'M-Link',
   helperName: 'com.mclient.helper',
-  helperDownloadUrl: 'https://github.com/Mag1c3R/m-client/releases/latest', // архивы помощника для всех ОС
-  userAgent: 'M-Client/0.1',
+  helperDownloadUrl: 'https://github.com/Mag1c3R/m-link/releases/latest', // архивы помощника для всех ОС
+  userAgent: 'M-Link/0.1',
 
   promo: {
     enabled: true,
