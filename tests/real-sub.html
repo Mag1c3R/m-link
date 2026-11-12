@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8"><title>real sub</title><pre id="out"></pre>
+<script type="module">
+// Разбирает настоящую подписку из tests/out/sub.txt (не коммитится) и сохраняет:
+//   tests/out/real-nodes.json  — узлы для замера задержки помощником
+//   tests/out/real-all.json    — один конфиг sing-box со всеми узлами для `sing-box check`
+//   tests/out/real-group-N.json — конфиги групп «Авто»
+import { parseSubscription } from '../extension/lib/parser.js';
+import { buildRunConfig } from '../extension/lib/singbox.js';
+const text = await (await fetch('out/sub.txt')).text();
+const t0 = performance.now();
+const { nodes, errors } = parseSubscription(text);
+const ms = Math.round(performance.now() - t0);
+const ok = nodes.filter((n) => !n.unsupported && !n.members);
+const groups = nodes.filter((n) => n.members);
+const bad = nodes.filter((n) => n.unsupported);
+const reasons = {};
+for (const n of bad) reasons[n.unsupported] = (reasons[n.unsupported] || 0) + 1;
+const labels = {};
+for (const n of ok) labels[n.label] = (labels[n.label] || 0) + 1;
+const save = (name, obj) => fetch('/save/' + name, { method: 'POST', body: JSON.stringify(obj, null, 1) });
+await save('real-nodes.json', ok.map((n) => ({ id: n.id, name: n.name, outbound: n.outbound, server: n.server, port: n.port })));
+await save('real-all.json', { log: { level: 'error' }, outbounds: [...ok.map((n, i) => ({ ...n.outbound, tag: 'n' + i })), { type: 'direct', tag: 'direct' }], route: { final: 'direct' } });
+for (const [i, g] of groups.entries()) await save(`real-group-${i}.json`, { name: g.name, config: buildRunConfig(g.outbound, { port: 18790, members: g.members }) });
+const summary = { parseMs: ms, total: nodes.length, supported: ok.length, groups: groups.map((g) => g.label + ' ' + g.name), unsupported: bad.length, reasons, labels, errors: errors.length };
+await save('real-summary.json', summary);
+document.getElementById('out').textContent = JSON.stringify(summary, null, 1);
+document.title = 'done';
+</script>

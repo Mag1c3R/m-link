@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>M-Client</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Главный экран -->
+    <section id="view-main" class="view">
+      <header class="top">
+        <div class="brand">
+          <img src="icons/32.png" alt="" width="22" height="22">
+          <span id="brand-name">M-Client</span>
+        </div>
+        <button class="icon-btn" id="open-settings" title="Настройки" aria-label="Настройки">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+        </button>
+      </header>
+
+      <div class="hero" id="hero">
+        <button class="power" id="power" aria-label="Подключить">
+          <svg viewBox="0 0 24 24" width="34" height="34"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M12 3v8M6.3 6.6a8 8 0 1 0 11.4 0"/></svg>
+        </button>
+        <div class="hero-text">
+          <div class="status" id="status-text">Отключено</div>
+          <div class="node-line" id="node-line">Узел не выбран</div>
+          <button class="mode-chip" id="mode-chip"></button>
+        </div>
+      </div>
+
+      <div class="banner" id="banner" hidden></div>
+
+      <div class="toolbar">
+        <div class="search-wrap">
+          <input id="search" type="search" placeholder="Поиск узла" autocomplete="off">
+        </div>
+        <button class="icon-btn" id="test-all" title="Проверить задержку всех узлов" aria-label="Проверить задержку">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+        </button>
+        <button class="icon-btn" id="update-all" title="Обновить подписки" aria-label="Обновить подписки">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>
+        </button>
+        <button class="icon-btn accent" id="toggle-add" title="Добавить подписку или узел" aria-label="Добавить">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+
+      <div class="add-panel" id="add-panel" hidden>
+        <textarea id="add-input" rows="3" placeholder="Ссылка на подписку (https://…) или ссылки на узлы: vless://, hy2://, vmess://, trojan://, ss://, tuic://"></textarea>
+        <div class="add-actions">
+          <span class="hint">Можно вставить сразу несколько, по одной на строку</span>
+          <button class="btn primary" id="add-submit">Добавить</button>
+        </div>
+      </div>
+
+      <div class="list" id="list"></div>
+
+      <footer class="foot" id="foot"></footer>
+    </section>
+
+    <!-- Настройки -->
+    <section id="view-settings" class="view" hidden>
+      <header class="top">
+        <button class="icon-btn" id="close-settings" aria-label="Назад">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="brand"><span>Настройки</span></div>
+        <span style="width:32px"></span>
+      </header>
+
+      <div class="settings">
+        <label class="field">
+          <span class="label">Какие сайты пускать через прокси</span>
+          <div class="segmented" id="mode-seg">
+            <button data-mode="all">Все</button>
+            <button data-mode="except">Все, кроме списка</button>
+            <button data-mode="only">Только список</button>
+          </div>
+        </label>
+
+        <label class="field" id="except-field">
+          <span class="label">Напрямую (без прокси)</span>
+          <textarea id="except-list" rows="4" spellcheck="false"></textarea>
+          <span class="hint">Домены или зоны, по одному на строку: ru, рф, gosuslugi.ru</span>
+        </label>
+
+        <label class="field" id="only-field">
+          <span class="label">Только эти сайты через прокси</span>
+          <textarea id="only-list" rows="4" spellcheck="false" placeholder="youtube.com&#10;googlevideo.com&#10;instagram.com"></textarea>
+          <span class="hint">Поддомены включаются автоматически</span>
+        </label>
+
+        <div class="row2">
+          <label class="field">
+            <span class="label">Локальный порт</span>
+            <input id="port" type="number" min="1024" max="65535">
+          </label>
+          <label class="field">
+            <span class="label">Обновлять подписки, ч</span>
+            <input id="update-hours" type="number" min="1" max="168">
+          </label>
+        </div>
+
+        <label class="field">
+          <span class="label">User-Agent для подписок</span>
+          <input id="user-agent" type="text" spellcheck="false">
+          <span class="hint">Некоторые панели отдают разный формат в зависимости от него</span>
+        </label>
+
+        <div class="field">
+          <span class="label">Помощник</span>
+          <div class="helper-box" id="helper-box">Проверяю…</div>
+        </div>
+
+        <button class="btn primary wide" id="save-settings">Сохранить</button>
+      </div>
+    </section>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

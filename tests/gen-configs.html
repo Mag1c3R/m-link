@@ -1,0 +1,33 @@
+<!doctype html><meta charset="utf-8"><title>gen configs</title><pre id="out"></pre>
+<script type="module">
+// Собирает конфиги из типовых ссылок и сохраняет их в tests/out/ для `sing-box check`.
+import { parseLink } from '../extension/lib/parser.js';
+import { buildRunConfig } from '../extension/lib/singbox.js';
+const fx = await (await fetch('fixtures.json')).json();
+const links = {
+  'vless-reality': 'vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443?security=reality&sni=www.microsoft.com&fp=chrome&pbk=SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc&sid=abcd&flow=xtls-rprx-vision&type=tcp#r',
+  'vless-ws': 'vless://11111111-2222-3333-4444-555555555555@h.com:443?security=tls&type=ws&path=%2Fws%3Fed%3D2048&host=cdn.h.com#ws',
+  'vless-grpc': 'vless://11111111-2222-3333-4444-555555555555@[2001:db8::1]:443?security=tls&type=grpc&serviceName=gun#g',
+  'vless-h2': 'vless://11111111-2222-3333-4444-555555555555@h.com:443?security=tls&type=http&host=h.com&path=%2Fh2#h2',
+  'vless-httpupgrade': 'vless://11111111-2222-3333-4444-555555555555@h.com:80?type=httpupgrade&host=h.com&path=%2Fu#hu',
+  'vmess': fx.vmess,
+  'trojan': 'trojan://pass@t.com:443?sni=t.com&allowInsecure=1#t',
+  'ss-aead': 'ss://YWVzLTI1Ni1nY206cGFzcw@5.6.7.8:8388#ss1',
+  'ss-2022': 'ss://2022-blake3-aes-128-gcm:' + encodeURIComponent(btoa('0123456789abcdef')) + '@5.6.7.8:443#x',
+  'ss-obfs': 'ss://YWVzLTI1Ni1nY206cGFzcw@5.6.7.8:8388/?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Da.com#p',
+  'hy2': 'hysteria2://pa%3Ass@hy.com:443?sni=hy.com&obfs=salamander&obfs-password=xyz&insecure=1#hy2',
+  'hy2-hop': 'hy2://pass@1.1.1.1:443,20000-30000/?sni=a.com&upmbps=50&downmbps=200#multi',
+  'hysteria1': 'hysteria://h.com:443?auth=abc&peer=h.com&upmbps=20&downmbps=100&obfsParam=o#h1',
+  'tuic': 'tuic://11111111-2222-3333-4444-555555555555:pw@t.com:443?congestion_control=bbr&alpn=h3&sni=t.com&udp_relay_mode=native#tuic',
+  'anytls': 'anytls://pw@a.com:443?sni=a.com#a',
+  'socks': 'socks://dXNlcjpwYXNz@9.9.9.9:1080#s',
+};
+const out = document.getElementById('out');
+for (const [name, link] of Object.entries(links)) {
+  const n = parseLink(link);
+  const body = JSON.stringify(buildRunConfig(n.outbound, { port: 10808 }), null, 2);
+  await fetch('/save/' + name + '.json', { method: 'POST', body });
+  out.textContent += name + '\n';
+}
+document.title = 'done ' + Object.keys(links).length;
+</script>

@@ -1,0 +1,43 @@
+<!doctype html><meta charset="utf-8"><title>popup preview</title>
+<link rel="stylesheet" href="../extension/popup.css">
+<style>html{background:#888}body{margin:20px auto;box-shadow:0 10px 40px rgba(0,0,0,.4)}</style>
+<script type="module">
+// Заглушка chrome.* для просмотра popup вне расширения. ?empty=1 — пустое состояние, ?state=on|error
+import { parseSubscription, parseLink } from '../extension/lib/parser.js';
+const q = new URLSearchParams(location.search);
+const sub = parseSubscription([
+  'vless://u@1.1.1.1:443?security=reality&pbk=K&sid=1&sni=a.com&flow=xtls-rprx-vision#🇳🇱 Нидерланды',
+  'vless://u@1.1.1.2:443?security=reality&pbk=K&sid=1&sni=a.com#🇩🇪 Германия',
+  'hy2://p@2.2.2.2:443?sni=b.com#🇫🇮 Финляндия Hy2',
+  'vless://u@1.1.1.3:443?security=tls&type=ws&path=/ws#🇺🇸 США CDN',
+  'vless://u@1.1.1.4:443?security=tls&type=xhttp#🇯🇵 Япония XHTTP',
+].join('\n')).nodes;
+const manual = [parseLink('tuic://a:b@t.com:443?sni=t.com#Мой TUIC')];
+const lat = { [sub[0].id]: 84, [sub[1].id]: 412, [sub[2].id]: 57, [sub[3].id]: -1 };
+const local = q.get('empty') ? { subs: [], manual: [] } : {
+  subs: [{ id: 's1', url: 'https://sub.example/abc', name: 'M-VPN Premium', nodes: sub, updatedAt: Date.now() - 3600e3,
+    userinfo: { upload: 2.1e9, download: 14.3e9, total: 100 * 2 ** 30, expire: 1798761600 } }],
+  manual, selectedId: sub[0].id, latency: lat,
+  settings: { mode: 'except', exceptList: 'ru\nsu\nрф\nby', onlyList: '', port: 10808, updateHours: 12, userAgent: 'M-Client/0.1' },
+};
+const st = q.get('state') || 'off';
+const session = { status: st === 'on' ? { state: 'on', nodeName: sub[0].name, since: Date.now() - 754e3 }
+  : st === 'error' ? { state: 'error', code: 'no_helper', error: 'Помощник не установлен. Он нужен, чтобы работали VLESS, Hysteria2 и другие протоколы.' }
+  : { state: 'off' }, testing: null };
+const area = (data) => ({ get: async (d) => ({ ...d, ...data }), set: async () => {} });
+window.chrome = {
+  storage: { local: area(local), session: area(session), onChanged: { addListener() {} } },
+  runtime: { sendMessage: async (m) => (q.get('nohelper') && ['test', 'connect'].includes(m.type)
+    ? { ok: false, code: 'no_helper', error: 'Помощник не установлен.' }
+    : m.type === 'helperInfo'
+    ? { ok: true, installed: true, version: '0.1.0', core: '1.12.9', corePath: '~/Library/Application Support/MClient/sing-box' }
+    : { ok: true, added: 0 }) },
+};
+const html = await (await fetch('../extension/popup.html')).text();
+const doc = new DOMParser().parseFromString(html, 'text/html');
+doc.querySelectorAll('script').forEach((s) => s.remove());
+doc.querySelectorAll('img').forEach((i) => i.setAttribute('src', '../extension/' + i.getAttribute('src')));
+document.body.innerHTML = doc.body.innerHTML;
+await import('../extension/popup.js');
+</script>
+<body></body>
