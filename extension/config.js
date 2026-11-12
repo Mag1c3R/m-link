@@ -2,7 +2,7 @@
 export const BRAND = {
   name: 'M-Client',
   helperName: 'com.mclient.helper',
-  helperDownloadUrl: 'https://example.com/m-client/helper', // страница со скачиванием помощника
+  helperDownloadUrl: 'https://github.com/Mag1c3R/m-client/releases/latest', // архивы помощника для всех ОС
   userAgent: 'M-Client/0.1',
 
   promo: {
