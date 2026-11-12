@@ -1,27 +1,64 @@
 <!doctype html><meta charset="utf-8"><title>popup preview</title>
 <link rel="stylesheet" href="../extension/popup.css">
-<style>html{background:#888}body{margin:20px auto;box-shadow:0 10px 40px rgba(0,0,0,.4)}</style>
+<style>html{background:#888}body{margin:20px auto;box-shadow:0 10px 40px rgba(0,0,0,.4)}
+html.bare{background:transparent}html.bare body{margin:0;box-shadow:none}</style>
 <script type="module">
-// Заглушка chrome.* для просмотра popup вне расширения. ?empty=1 — пустое состояние, ?state=on|error
+// Заглушка chrome.* для просмотра popup вне расширения.
+//   ?empty=1           — пустое состояние
+//   ?state=on|error    — подключено / ошибка
+//   ?nohelper=1        — пинг и подключение отвечают «помощник не установлен»
+//   ?demo=1            — красивые демо-данные для скриншотов магазина
+//   ?view=settings     — сразу открыть настройки
+//   ?add=<текст>       — открыть панель добавления с этим текстом
+//   ?bare=1            — без серого фона и тени (для вставки в iframe)
 import { parseSubscription, parseLink } from '../extension/lib/parser.js';
 const q = new URLSearchParams(location.search);
-const sub = parseSubscription([
-  'vless://u@1.1.1.1:443?security=reality&pbk=K&sid=1&sni=a.com&flow=xtls-rprx-vision#🇳🇱 Нидерланды',
-  'vless://u@1.1.1.2:443?security=reality&pbk=K&sid=1&sni=a.com#🇩🇪 Германия',
-  'hy2://p@2.2.2.2:443?sni=b.com#🇫🇮 Финляндия Hy2',
-  'vless://u@1.1.1.3:443?security=tls&type=ws&path=/ws#🇺🇸 США CDN',
-  'vless://u@1.1.1.4:443?security=tls&type=xhttp#🇯🇵 Япония XHTTP',
-].join('\n')).nodes;
-const manual = [parseLink('tuic://a:b@t.com:443?sni=t.com#Мой TUIC')];
-const lat = { [sub[0].id]: 84, [sub[1].id]: 412, [sub[2].id]: 57, [sub[3].id]: -1 };
-const local = q.get('empty') ? { subs: [], manual: [] } : {
-  subs: [{ id: 's1', url: 'https://sub.example/abc', name: 'M-VPN Premium', nodes: sub, updatedAt: Date.now() - 3600e3,
-    userinfo: { upload: 2.1e9, download: 14.3e9, total: 100 * 2 ** 30, expire: 1798761600 } }],
-  manual, selectedId: sub[0].id, latency: lat,
-  settings: { mode: 'except', exceptList: 'ru\nsu\nрф\nby', onlyList: '', port: 10808, updateHours: 12, userAgent: 'M-Link/0.1' },
-};
+if (q.get('bare')) document.documentElement.classList.add('bare');
+
+let local;
+let connectedName;
+if (q.get('demo')) {
+  const links = [
+    ['vless://u@1.1.1.1:443?security=reality&pbk=K&sid=1&sni=a.com&flow=xtls-rprx-vision', '🇳🇱 Нидерланды #1', 42],
+    ['hy2://p@2.2.2.2:443?sni=b.com', '🇫🇮 Финляндия · Hysteria2', 37],
+    ['vless://u@1.1.1.2:443?security=reality&pbk=K&sid=1&sni=a.com&flow=xtls-rprx-vision', '🇩🇪 Германия #1', 58],
+    ['vless://u@1.1.1.5:443?security=reality&pbk=K&sid=1&sni=a.com&type=grpc&serviceName=g', '🇸🇪 Швеция #2', 71],
+    ['vless://u@1.1.1.3:443?security=tls&type=ws&path=/ws', '🇬🇧 Великобритания', 96],
+    ['trojan://p@3.3.3.3:443?sni=c.com', '🇺🇸 США · Нью-Йорк', 148],
+    ['tuic://a:b@t.com:443?sni=t.com', '🇯🇵 Япония · TUIC', 212],
+    ['ss://YWVzLTI1Ni1nY206cGFzcw@5.6.7.8:8388', '🇹🇷 Турция', 305],
+  ];
+  const nodes = links.map(([l, name]) => ({ ...parseLink(l + '#x'), name }));
+  const auto = { id: 'auto', name: '⚡ Авто — самый быстрый', type: 'urltest', label: 'Авто · 8', server: '', port: 0,
+    outbound: { type: 'urltest', outbounds: [] }, members: [] };
+  const latency = Object.fromEntries(nodes.map((n, i) => [n.id, links[i][2]]));
+  local = {
+    subs: [{ id: 's1', url: 'https://sub.example/abc', name: 'M-VPN', nodes: [auto, ...nodes], updatedAt: Date.now() - 20 * 60e3,
+      userinfo: { upload: 1.6e9, download: 17.2e9, total: 200 * 2 ** 30, expire: 1830297600 } }],
+    manual: [], selectedId: nodes[0].id, latency,
+    settings: { mode: 'except', exceptList: 'ru\nрф\nsu\nby', onlyList: '', port: 10808, updateHours: 12, userAgent: 'M-Link/0.1' },
+  };
+  connectedName = nodes[0].name;
+} else {
+  const sub = parseSubscription([
+    'vless://u@1.1.1.1:443?security=reality&pbk=K&sid=1&sni=a.com&flow=xtls-rprx-vision#🇳🇱 Нидерланды',
+    'vless://u@1.1.1.2:443?security=reality&pbk=K&sid=1&sni=a.com#🇩🇪 Германия',
+    'hy2://p@2.2.2.2:443?sni=b.com#🇫🇮 Финляндия Hy2',
+    'vless://u@1.1.1.3:443?security=tls&type=ws&path=/ws#🇺🇸 США CDN',
+    'vless://u@1.1.1.4:443?security=tls&type=xhttp#🇯🇵 Япония XHTTP',
+  ].join('\n')).nodes;
+  const manual = [parseLink('tuic://a:b@t.com:443?sni=t.com#Мой TUIC')];
+  const lat = { [sub[0].id]: 84, [sub[1].id]: 412, [sub[2].id]: 57, [sub[3].id]: -1 };
+  local = q.get('empty') ? { subs: [], manual: [] } : {
+    subs: [{ id: 's1', url: 'https://sub.example/abc', name: 'M-VPN Premium', nodes: sub, updatedAt: Date.now() - 3600e3,
+      userinfo: { upload: 2.1e9, download: 14.3e9, total: 100 * 2 ** 30, expire: 1798761600 } }],
+    manual, selectedId: sub[0].id, latency: lat,
+    settings: { mode: 'except', exceptList: 'ru\nsu\nрф\nby', onlyList: '', port: 10808, updateHours: 12, userAgent: 'M-Link/0.1' },
+  };
+  connectedName = sub[0].name;
+}
 const st = q.get('state') || 'off';
-const session = { status: st === 'on' ? { state: 'on', nodeName: sub[0].name, since: Date.now() - 754e3 }
+const session = { status: st === 'on' ? { state: 'on', nodeName: connectedName, since: Date.now() - 754e3 }
   : st === 'error' ? { state: 'error', code: 'no_helper', error: 'Помощник не установлен. Он нужен, чтобы работали VLESS, Hysteria2 и другие протоколы.' }
   : { state: 'off' }, testing: null };
 const area = (data) => ({ get: async (d) => ({ ...d, ...data }), set: async () => {} });
@@ -30,7 +67,7 @@ window.chrome = {
   runtime: { sendMessage: async (m) => (q.get('nohelper') && ['test', 'connect'].includes(m.type)
     ? { ok: false, code: 'no_helper', error: 'Помощник не установлен.' }
     : m.type === 'helperInfo'
-    ? { ok: true, installed: true, version: '0.1.0', core: '1.12.9', corePath: '~/Library/Application Support/MClient/sing-box' }
+    ? { ok: true, installed: true, version: '0.1.0', core: '1.14.4', corePath: '~/Library/Application Support/MClient/sing-box' }
     : { ok: true, added: 0 }) },
 };
 const html = await (await fetch('../extension/popup.html')).text();
@@ -39,5 +76,12 @@ doc.querySelectorAll('script').forEach((s) => s.remove());
 doc.querySelectorAll('img').forEach((i) => i.setAttribute('src', '../extension/' + i.getAttribute('src')));
 document.body.innerHTML = doc.body.innerHTML;
 await import('../extension/popup.js');
+await new Promise((r) => setTimeout(r, 50));
+if (q.get('view') === 'settings') document.getElementById('open-settings').click();
+if (q.get('add') !== null) {
+  document.getElementById('add-panel').hidden = false;
+  document.getElementById('add-input').value = q.get('add');
+}
+document.documentElement.dataset.ready = '1';
 </script>
 <body></body>

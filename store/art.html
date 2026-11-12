@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>M-Link store art</title>
+<!-- Макеты картинок для Chrome Web Store. Открывать через tests/serve.py:
+     /store/art.html?kind=s1..s5 (1280x800), small (440x280), marquee (1400x560).
+     Рендер в файлы: sh store/render.sh -->
+<style>
+  :root { --w: 1280px; --h: 800px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: var(--w); height: var(--h); overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    color: #fff;
+    background:
+      radial-gradient(900px 600px at 85% 20%, rgba(167, 139, 250, .45), transparent 60%),
+      radial-gradient(700px 500px at 10% 100%, rgba(99, 102, 241, .5), transparent 60%),
+      linear-gradient(135deg, #1e1b4b 0%, #312e81 45%, #5b21b6 100%);
+    position: relative;
+  }
+  .grid-bg {
+    position: absolute; inset: 0; opacity: .08;
+    background-image: linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at 30% 50%, #000 0%, transparent 75%);
+  }
+  .brand { display: flex; align-items: center; gap: 14px; font-weight: 700; font-size: 26px; letter-spacing: -.01em; }
+  .brand img { width: 44px; height: 44px; border-radius: 11px; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+  h1 { font-size: 58px; line-height: 1.06; letter-spacing: -.025em; margin: 0; font-weight: 800; }
+  h1 em { font-style: normal; background: linear-gradient(90deg, #c4b5fd, #f0abfc); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 23px; line-height: 1.45; color: rgba(255,255,255,.78); margin: 22px 0 0; max-width: 560px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; max-width: 600px; }
+  .chip { padding: 8px 15px; border-radius: 999px; font-size: 17px; font-weight: 600;
+    background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); color: #ede9fe; }
+  .left { position: absolute; left: 80px; top: 0; bottom: 0; width: 620px; display: flex; flex-direction: column; justify-content: center; }
+  .left .brand { position: absolute; top: 64px; left: 0; }
+  .popup-wrap { position: absolute; right: 110px; top: 50%; width: 380px; height: 600px;
+    transform: translateY(-50%) scale(1.18); transform-origin: center; border-radius: 18px; overflow: hidden;
+    box-shadow: 0 40px 90px -20px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.12); background: #f6f7fb; }
+  .popup-wrap iframe { width: 380px; height: 600px; border: 0; display: block; }
+
+  /* слайд с карточками */
+  .cards { position: absolute; right: 80px; top: 50%; transform: translateY(-50%); width: 500px; display: grid; gap: 18px; }
+  .card { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); border-radius: 20px; padding: 24px 26px;
+    display: flex; gap: 18px; align-items: flex-start; }
+  .card .ic { width: 50px; height: 50px; border-radius: 14px; flex: none; display: grid; place-items: center;
+    background: linear-gradient(135deg, #818cf8, #a78bfa); }
+  .card b { display: block; font-size: 22px; margin-bottom: 5px; }
+  .card span { font-size: 17px; color: rgba(255,255,255,.75); line-height: 1.4; }
+
+  /* маленькая плитка 440x280 */
+  body.small .center { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 36px; }
+  body.small .brand { font-size: 38px; gap: 16px; }
+  body.small .brand img { width: 64px; height: 64px; border-radius: 16px; }
+  body.small .tag { font-size: 21px; margin-top: 16px; color: rgba(255,255,255,.85); font-weight: 600; line-height: 1.3; }
+  body.small .chips { margin-top: 18px; gap: 7px; }
+  body.small .chip { font-size: 13.5px; padding: 5px 11px; }
+
+  /* большая плитка 1400x560 */
+  body.marquee .left { left: 96px; width: 700px; }
+  body.marquee .brand { position: static; font-size: 30px; margin-bottom: 26px; }
+  body.marquee .brand img { width: 54px; height: 54px; border-radius: 13px; }
+  body.marquee h1 { font-size: 60px; }
+  body.marquee .popup-wrap { right: 150px; top: 70px; transform: rotate(-4deg) scale(1.05); transform-origin: top center; }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div id="root"></div>
+<script>
+const ICON = '../extension/icons/128.png';
+const PROTOS = ['VLESS', 'Reality', 'Hysteria2', 'VMess', 'Trojan', 'Shadowsocks', 'TUIC'];
+const chips = (list) => `<div class="chips">${list.map((c) => `<span class="chip">${c}</span>`).join('')}</div>`;
+const brand = `<div class="brand"><img src="${ICON}" alt="">M-Link</div>`;
+const popup = (params) => `<div class="popup-wrap"><iframe src="../tests/preview.html?bare=1&demo=1&${params}"></iframe></div>`;
+const svg = (d) => `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+
+const slides = {
+  s1: () => `<div class="left">${brand}
+      <h1>Твои VPN-подписки — <em>прямо в браузере</em></h1>
+      <p class="sub">Вставь ссылку на подписку, выбери страну и подключайся одним нажатием.</p>
+      ${chips(PROTOS)}</div>${popup('state=on')}`,
+  s2: () => `<div class="left">${brand}
+      <h1>Пинг всех серверов<br><em>за секунды</em></h1>
+      <p class="sub">Настоящий замер через ядро sing-box, даже для Hysteria2 и TUIC. Группа «Авто» сама выберет самый быстрый сервер.</p>
+      ${chips(['42 мс', '37 мс', '58 мс', 'Авто'])}</div>${popup('state=off')}`,
+  s3: () => `<div class="left">${brand}
+      <h1>Сам решай, какие сайты <em>идут через VPN</em></h1>
+      <p class="sub">Все сайты, все кроме российских или только выбранные. Сайты .ru и .рф по умолчанию открываются напрямую.</p>
+      ${chips(['Все сайты', 'Кроме .ru и .рф', 'Только выбранные'])}</div>${popup('view=settings')}`,
+  s4: () => `<div class="left">${brand}
+      <h1>Подходит <em>любая подписка</em></h1>
+      <p class="sub">Ссылки vless:// и hy2://, base64, JSON для sing-box и xray. Remnawave, Marzban, 3x-ui. Остаток трафика и срок подписки всегда на виду.</p>
+      ${chips(['base64', 'sing-box JSON', 'xray JSON', 'vless://', 'hy2://'])}</div>${popup('add=https://sub.m-vpn.example/k/Xa7fQ2pL9')}`,
+  s5: () => `<div class="left" style="width:600px">${brand}
+      <h1>Открытый код. <em>Ничего не собираем.</em></h1>
+      <p class="sub">Подписки и настройки хранятся только на твоём компьютере. Исходники — на GitHub.</p></div>
+      <div class="cards">
+        <div class="card"><div class="ic">${svg('<rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>')}</div>
+          <div><b>Данные остаются у тебя</b><span>Никакой статистики, истории и аналитики.</span></div></div>
+        <div class="card"><div class="ic">${svg('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>')}</div>
+          <div><b>Windows, macOS, Linux</b><span>Помощник ставится за минуту, ядро sing-box уже внутри.</span></div></div>
+        <div class="card"><div class="ic">${svg('<path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z"/><path d="m9 12 2 2 4-4"/>')}</div>
+          <div><b>Браузер не останется без сети</b><span>Если соединение оборвалось, прокси сразу отключается.</span></div></div>
+      </div>`,
+  small: () => `<div class="center">${brand}
+      <div class="tag">VPN-подписки прямо в браузере</div>
+      ${chips(['VLESS', 'Reality', 'Hysteria2', 'Trojan'])}</div>`,
+  marquee: () => `<div class="left">${brand}
+      <h1>Твои VPN-подписки — <em>прямо в браузере</em></h1>
+      <p class="sub">VLESS, Reality, Hysteria2, Trojan, TUIC. Любые подписки, пинг серверов и выбор сайтов.</p></div>
+      ${popup('state=on')}`,
+};
+
+const kind = new URLSearchParams(location.search).get('kind') || 's1';
+const sizes = { small: [440, 280], marquee: [1400, 560] };
+const [w, h] = sizes[kind] || [1280, 800];
+document.documentElement.style.setProperty('--w', w + 'px');
+document.documentElement.style.setProperty('--h', h + 'px');
+document.body.className = kind;
+document.getElementById('root').innerHTML = slides[kind]();
+</script>
+</body>
+</html>
