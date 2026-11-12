@@ -1,0 +1,13 @@
+{
+  "helper": {
+    "latest": "1.0.0",
+    "min": "1.0.0"
+  },
+  "promo": {
+    "enabled": true,
+    "title": "Нет своей подписки?",
+    "text": "M-VPN: подписка через Telegram-бота. Получи ссылку и вставь её сюда кнопкой «+».",
+    "button": "Открыть бота M-VPN",
+    "url": "https://t.me/mag1c3r_vpn_bot?start=mclient"
+  }
+}

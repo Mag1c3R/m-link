@@ -1,21 +1,25 @@
-import { BRAND } from './config.js';
+import { BRAND, sanitizePromo } from './config.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+const VERSION = chrome.runtime.getManifest().version;
+const DEFAULT_UA = `${BRAND.name}/${VERSION}`;
+
 let state = null;
 let status = { state: 'off' };
-let testing = null;
+let testing = null; // { group, count } во время замера пинга
 let filter = '';
 let timerId = null;
-let helperMissing = null; // текст ошибки, если при пинге выяснилось, что помощника нет
-const collapsed = new Set(readCollapsed());
+let helper = null; // ответ helperInfo: установлен ли помощник и какой версии
+let platform = null; // { os, arch }
+const collapsed = new Set(readStored('collapsed', []));
 
-function readCollapsed() {
-  try { return JSON.parse(localStorage.getItem('collapsed') || '[]'); } catch { return []; }
+function readStored(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) ?? 'null') ?? fallback; } catch { return fallback; }
 }
-function saveCollapsed() {
-  try { localStorage.setItem('collapsed', JSON.stringify([...collapsed])); } catch { /* ничего */ }
+function writeStored(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ничего */ }
 }
 
 function send(type, payload = {}) {
@@ -26,9 +30,15 @@ function send(type, payload = {}) {
   });
 }
 
+// Ошибки «нет помощника» и «помощник устарел» показываем карточкой установки, остальные — всплывающим сообщением.
 function onError(e) {
   if (e.code === 'no_helper') {
-    helperMissing = e.message;
+    helper = { installed: false, code: e.code, error: e.message };
+    renderSetup();
+    renderHero();
+  } else if (e.code === 'old_helper') {
+    helper = { ...(helper || {}), installed: true, outdated: true };
+    renderSetup();
     renderHero();
   } else {
     toast(e.message, true);
@@ -102,6 +112,85 @@ function allNodes() {
   return [...state.subs.flatMap((s) => s.nodes || []), ...state.manual];
 }
 
+function promo() {
+  const remote = sanitizePromo(state?.remote?.promo);
+  return remote || BRAND.promo;
+}
+
+// Какую карточку про помощник показывать: install | required | core | update | null
+function setupMode() {
+  if (!helper) return null;
+  if (!helper.installed) return 'install';
+  if (helper.outdated) return 'required';
+  if (helper.coreError) return 'core';
+  if (helper.updateAvailable && readStored('dismissedHelper', '') !== helper.latest) return 'update';
+  return null;
+}
+
+function archiveName() {
+  if (!platform) return null;
+  if (platform.os === 'win') return 'm-link-helper-windows-amd64.zip';
+  const arch = platform.arch === 'arm64' ? 'arm64' : platform.arch === 'x86-64' ? 'amd64' : null;
+  if (!arch) return null;
+  if (platform.os === 'mac') return `m-link-helper-darwin-${arch}.tar.gz`;
+  if (platform.os === 'linux') return `m-link-helper-linux-${arch}.tar.gz`;
+  return null;
+}
+
+function installSteps() {
+  const file = archiveName();
+  const url = file ? `${BRAND.downloadBase}/${file}` : BRAND.releasesUrl;
+  if (platform?.os === 'win') {
+    return `<ol class="steps">
+        <li>Скачай архив и распакуй его целиком</li>
+        <li>Запусти <b>install.bat</b> из распакованной папки</li>
+      </ol>
+      <div class="actions">
+        <a class="btn primary small" href="${esc(url)}" target="_blank" rel="noopener">Скачать для Windows</a>
+        <button class="btn small" data-check>Проверить</button>
+      </div>`;
+  }
+  if (platform?.os === 'mac' || platform?.os === 'linux') {
+    return `<p>Открой «Терминал», вставь команду и нажми Enter:</p>
+      <div class="cmd"><code id="install-cmd">${esc(BRAND.installCommand)}</code></div>
+      <div class="actions">
+        <button class="btn primary small" data-copy>Скопировать команду</button>
+        <button class="btn small" data-check>Проверить</button>
+        ${file ? `<a class="link" href="${esc(url)}" target="_blank" rel="noopener">или скачать архив</a>` : ''}
+      </div>`;
+  }
+  return `<p>Помощник есть для Windows, macOS и Linux.</p>
+    <div class="actions">
+      <a class="btn primary small" href="${esc(BRAND.releasesUrl)}" target="_blank" rel="noopener">Открыть страницу загрузки</a>
+      <button class="btn small" data-check>Проверить</button>
+    </div>`;
+}
+
+function renderSetup() {
+  const box = $('setup');
+  const mode = setupMode();
+  if (!mode) { box.hidden = true; return; }
+  let head;
+  if (mode === 'install') {
+    const other = helper.code && helper.code !== 'no_helper' ? `<div class="err">${esc(helper.error || '')}</div>` : '';
+    head = `<h4>Установи помощник</h4>
+      <p>Браузер сам не умеет VLESS, Hysteria2 и другие протоколы. Их обслуживает небольшая программа с открытым кодом. Ставится один раз.</p>${other}`;
+  } else if (mode === 'required') {
+    head = `<h4>Обнови помощник</h4>
+      <p>${helper.version ? `Установлена версия ${esc(helper.version)}, а` : 'Установленная версия устарела:'} этой версии расширения нужна ${esc(BRAND.minHelper)} или новее. Установи помощник заново:</p>`;
+  } else if (mode === 'core') {
+    head = `<h4>Не найден sing-box</h4>
+      <p>Помощник установлен, но рядом с ним нет ядра sing-box. Установи помощник заново, ядро входит в комплект:</p>`;
+  } else {
+    head = `<button class="icon-btn close" data-dismiss title="Скрыть" aria-label="Скрыть">${ICON.x}</button>
+      <h4>Доступен помощник ${esc(helper.latest)}</h4>
+      <p>У тебя версия ${esc(helper.version)}. Чтобы обновить, установи помощник заново тем же способом:</p>`;
+  }
+  box.className = 'setup' + (mode === 'update' ? ' light' : '');
+  box.innerHTML = head + installSteps();
+  box.hidden = false;
+}
+
 function renderHero() {
   const hero = $('hero');
   const st = status.state;
@@ -121,15 +210,10 @@ function renderHero() {
   clearInterval(timerId);
   if (st === 'on') timerId = setInterval(renderHero, 1000);
 
+  // Про отсутствие помощника рассказывает карточка установки, дублировать это красным баннером не нужно.
   const banner = $('banner');
-  const noHelper = (st === 'error' && status.code === 'no_helper') || (helperMissing && st !== 'on');
-  if (noHelper) {
-    banner.hidden = false;
-    banner.innerHTML = `<b>Помощник не установлен.</b> Без него не работают подключение и замер пинга:
-      браузер сам не умеет VLESS и Hysteria2.
-      <div class="row"><a href="${esc(BRAND.helperDownloadUrl)}" target="_blank" rel="noopener">Скачать помощник</a></div>
-      <div class="hint-small">Распакуй архив, запусти install.sh (macOS/Linux) или install.bat (Windows) и перезапусти браузер.</div>`;
-  } else if (st === 'error' && status.error) {
+  const helperIssue = status.code === 'no_helper' || status.code === 'old_helper';
+  if (st === 'error' && status.error && !(helperIssue && setupMode())) {
     banner.hidden = false;
     banner.textContent = status.error;
   } else {
@@ -142,7 +226,7 @@ function nodeRow(n, canDelete) {
   const sel = n.id === state.selectedId;
   const cls = ['node', sel && 'selected', sel && status.state === 'on' && 'active', n.unsupported && 'unsupported']
     .filter(Boolean).join(' ');
-  const title = n.unsupported ? n.unsupported : `${n.server}:${n.port}`;
+  const title = n.unsupported ? n.unsupported : n.members ? 'Сам выбирает самый быстрый сервер из группы' : `${n.server}:${n.port}`;
   return `<div class="${cls}" role="button" tabindex="0" data-node="${esc(n.id)}" title="${esc(title)}">
     <span class="dot"></span>
     <span class="node-name">${esc(n.name)}</span>
@@ -166,10 +250,39 @@ function matches(n) {
   return n.name.toLowerCase().includes(q) || (n.label || '').toLowerCase().includes(q) || (n.server || '').includes(q);
 }
 
+// Порядок и видимость узлов в группе: скрываем неподдерживаемые, после замера ставим быстрые выше.
+function visibleNodes(nodes) {
+  const s = state.settings;
+  let list = nodes.map((n, i) => ({ n, i }));
+  if (!s.showUnsupported) list = list.filter(({ n }) => !n.unsupported || n.id === state.selectedId);
+  list = list.filter(({ n }) => matches(n));
+  if (s.sortByPing) {
+    const rank = ({ n }) => {
+      if (n.members) return -1; // группы «Авто» всегда сверху
+      if (n.unsupported) return 4e6;
+      const ms = state.latency[n.id];
+      if (ms == null) return 2e6; // ещё не меряли: после живых, в исходном порядке
+      if (ms < 0) return 3e6; // недоступные — в конец
+      return ms;
+    };
+    list.sort((a, b) => rank(a) - rank(b) || a.i - b.i);
+  }
+  return list.map((x) => x.n);
+}
+
+function countText(nodes) {
+  const bad = nodes.filter((n) => n.unsupported).length;
+  const good = nodes.length - bad;
+  return `${good} узл.` + (bad && !state.settings.showUnsupported ? ` (+${bad} не поддерж.)` : '');
+}
+
 function groupHtml({ id, name, meta, nodes, traffic, canDelete, actions }) {
-  const shown = nodes.filter(matches);
+  const shown = visibleNodes(nodes);
   if (filter && !shown.length) return '';
   const isCollapsed = collapsed.has(id) && !filter;
+  const body = shown.length
+    ? shown.map((n) => nodeRow(n, canDelete)).join('')
+    : '<div class="node unsupported"><span class="node-name">Нет узлов, которые поддерживает расширение</span></div>';
   return `<div class="group ${isCollapsed ? 'collapsed' : ''}" data-group="${esc(id)}">
     <div class="group-head" data-toggle="${esc(id)}">
       ${ICON.chev}
@@ -180,21 +293,25 @@ function groupHtml({ id, name, meta, nodes, traffic, canDelete, actions }) {
       ${actions}
     </div>
     ${traffic != null ? `<div class="traffic"><i style="width:${Math.min(100, traffic)}%"></i></div>` : ''}
-    <div class="nodes">${shown.map((n) => nodeRow(n, canDelete)).join('')}</div>
+    <div class="nodes">${body}</div>
   </div>`;
 }
 
 function subMeta(sub) {
-  const parts = [`${sub.nodes.length} узл.`];
+  const parts = [countText(sub.nodes)];
   const ui = sub.userinfo;
   if (ui && (ui.total || ui.download || ui.upload)) {
     const used = (ui.upload || 0) + (ui.download || 0);
     parts.push(ui.total ? `${fmtBytes(used)} из ${fmtBytes(ui.total)}` : fmtBytes(used));
   }
   if (ui?.expire) parts.push('до ' + fmtDate(ui.expire));
-  if (sub.error) return parts.join(' · ') + ` · <span class="err" title="${esc(sub.error)}">ошибка обновления</span>`;
+  if (sub.error) return esc(parts.join(' · ')) + ` · <span class="err" title="${esc(sub.error)}">ошибка обновления</span>`;
   parts.push(fmtAgo(sub.updatedAt));
   return esc(parts.join(' · '));
+}
+
+function isTesting(group) {
+  return !!testing && (testing.group === group || testing.group === 'all');
 }
 
 function renderList() {
@@ -203,7 +320,6 @@ function renderList() {
   for (const sub of state.subs) {
     const ui = sub.userinfo;
     const traffic = ui?.total ? (((ui.upload || 0) + (ui.download || 0)) / ui.total) * 100 : null;
-    const isTesting = testing === sub.id || testing === 'all';
     groups.push(groupHtml({
       id: sub.id,
       name: sub.name,
@@ -212,7 +328,7 @@ function renderList() {
       traffic,
       canDelete: false,
       actions: `
-        <button class="icon-btn ${isTesting ? 'spin' : ''}" data-test="${esc(sub.id)}" title="Проверить задержку" aria-label="Проверить задержку">${ICON.bolt}</button>
+        <button class="icon-btn ${isTesting(sub.id) ? 'spin' : ''}" data-test="${esc(sub.id)}" title="Проверить задержку" aria-label="Проверить задержку">${ICON.bolt}</button>
         <button class="icon-btn" data-update="${esc(sub.url)}" title="Обновить" aria-label="Обновить">${ICON.refresh}</button>
         <button class="icon-btn danger" data-remove-sub="${esc(sub.id)}" title="Удалить подписку" aria-label="Удалить подписку">${ICON.trash}</button>`,
     }));
@@ -221,10 +337,10 @@ function renderList() {
     groups.push(groupHtml({
       id: 'manual',
       name: 'Мои узлы',
-      meta: esc(`${state.manual.length} узл. · добавлены вручную`),
+      meta: esc(`${countText(state.manual)} · добавлены вручную`),
       nodes: state.manual,
       canDelete: true,
-      actions: `<button class="icon-btn ${testing === 'manual' || testing === 'all' ? 'spin' : ''}" data-test="manual" title="Проверить задержку" aria-label="Проверить задержку">${ICON.bolt}</button>`,
+      actions: `<button class="icon-btn ${isTesting('manual') ? 'spin' : ''}" data-test="manual" title="Проверить задержку" aria-label="Проверить задержку">${ICON.bolt}</button>`,
     }));
   }
 
@@ -240,10 +356,11 @@ function renderList() {
   }
   $('add-panel').hidden = hasAny ? $('add-panel').hidden : false;
   for (const id of ['search', 'test-all', 'update-all']) $(id).style.visibility = hasAny ? '' : 'hidden';
+  $('test-all').classList.toggle('spin', isTesting('all'));
 }
 
 function promoCard() {
-  const p = BRAND.promo;
+  const p = promo();
   if (!p.enabled) return '';
   return `<div class="promo">
     <b>${esc(p.title)}</b>
@@ -253,18 +370,56 @@ function promoCard() {
 }
 
 function renderFoot() {
-  const p = BRAND.promo;
+  const p = promo();
   const hasAny = state.subs.length || state.manual.length;
-  const left = `${allNodes().filter((n) => !n.unsupported).length} узлов`;
+  const left = testing
+    ? `Замер пинга: ${testing.count} узл.…`
+    : `${allNodes().filter((n) => !n.unsupported).length} узлов`;
   const right = p.enabled && hasAny ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.button)} →</a>` : '';
-  $('foot').innerHTML = `<span>${left}</span>${right}`;
+  $('foot').innerHTML = `<span>${esc(left)}</span>${right}`;
 }
 
 function render() {
   if (!state) return;
   renderHero();
+  renderSetup();
   renderList();
   renderFoot();
+}
+
+// ---------- помощник ----------
+
+async function checkHelper(announce = false) {
+  try {
+    helper = await send('helperInfo');
+  } catch (e) {
+    helper = { installed: false, code: 'helper', error: e.message };
+  }
+  if (!state) return;
+  renderSetup();
+  renderHero();
+  renderHelperBox();
+  if (!announce) return;
+  if (helper.installed && !helper.outdated && !helper.coreError) toast('Помощник работает');
+  else if (helper.installed && helper.outdated) toast('Найдена старая версия помощника. Установи новую.', true);
+  else if (helper.installed) toast('Помощник есть, но не найден sing-box', true);
+  else toast('Помощник пока не отвечает. Если только что установил его, перезапусти браузер.', true);
+}
+
+function renderHelperBox() {
+  const box = $('helper-box');
+  if (!box) return;
+  const h = helper;
+  if (!h) { box.textContent = 'Проверяю…'; return; }
+  if (!h.installed) {
+    box.innerHTML = `<span class="no">Не установлен.</span> ${esc(h.error || '')}<br>Как установить, показано на главном экране.`;
+  } else if (h.coreError) {
+    box.innerHTML = `<span class="ok">Помощник ${esc(h.version)}</span>, но <span class="no">ядро sing-box не найдено</span>: ${esc(h.coreError)}`;
+  } else {
+    const upd = h.outdated ? ' · <span class="no">нужно обновить</span>'
+      : h.updateAvailable ? ` · <span class="warn">доступна версия ${esc(h.latest)}</span>` : '';
+    box.innerHTML = `<span class="ok">Работает</span> · помощник ${esc(h.version)}${upd} · sing-box ${esc(h.core)}<br><code>${esc(h.corePath)}</code>`;
+  }
 }
 
 // ---------- настройки ----------
@@ -279,6 +434,9 @@ function fillSettings() {
   $('port').value = s.port;
   $('update-hours').value = s.updateHours;
   $('user-agent').value = s.userAgent;
+  $('sort-by-ping').checked = !!s.sortByPing;
+  $('show-unsupported').checked = !!s.showUnsupported;
+  $('about').innerHTML = `${esc(BRAND.name)} ${esc(VERSION)} · <a href="${esc(BRAND.repoUrl)}" target="_blank" rel="noopener">Исходный код</a> · <a href="${esc(BRAND.repoUrl)}/blob/main/PRIVACY.md" target="_blank" rel="noopener">Конфиденциальность</a>`;
   syncModeSeg();
 }
 
@@ -288,28 +446,12 @@ function syncModeSeg() {
   $('only-field').hidden = settingsMode !== 'only';
 }
 
-async function loadHelperInfo() {
-  const box = $('helper-box');
-  box.textContent = 'Проверяю…';
-  try {
-    const r = await send('helperInfo');
-    if (!r.installed) {
-      box.innerHTML = `<span class="no">Не установлен.</span> ${esc(r.error || '')}<br><a href="${esc(BRAND.helperDownloadUrl)}" target="_blank" rel="noopener">Скачать помощник</a>`;
-    } else if (r.coreError) {
-      box.innerHTML = `<span class="ok">Помощник ${esc(r.version)}</span>, но <span class="no">ядро sing-box не найдено</span>: ${esc(r.coreError)}`;
-    } else {
-      box.innerHTML = `<span class="ok">Работает</span> · помощник ${esc(r.version)} · sing-box ${esc(r.core)}<br><code>${esc(r.corePath)}</code>`;
-    }
-  } catch (e) {
-    box.textContent = e.message;
-  }
-}
-
 function openSettings() {
   fillSettings();
   $('view-main').hidden = true;
   $('view-settings').hidden = false;
-  loadHelperInfo();
+  renderHelperBox();
+  checkHelper();
 }
 
 function closeSettings() {
@@ -344,9 +486,9 @@ $('add-submit').addEventListener('click', async () => {
     const r = await send('add', { text });
     $('add-input').value = '';
     $('add-panel').hidden = true;
-    toast(`Добавлено узлов: ${r.added}` + (r.errors?.length ? `, пропущено: ${r.errors.length}` : ''));
+    toast(`Добавлено узлов: ${r.added}` + (r.unsupported ? `. Ещё ${r.unsupported} не поддерживаются` : ''));
   } catch (e) {
-    toast(e.message, true);
+    onError(e);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Добавить';
@@ -359,41 +501,70 @@ $('add-input').addEventListener('keydown', (e) => {
 
 $('search').addEventListener('input', (e) => { filter = e.target.value.trim(); renderList(); });
 
-$('test-all').addEventListener('click', (e) => busy(e.currentTarget, () => send('test', { group: null })));
+async function runTest(group) {
+  const r = await send('test', { group });
+  if (r.tested) toast(`Работают ${r.alive} из ${r.tested}`);
+}
+
+$('test-all').addEventListener('click', (e) => busy(e.currentTarget, () => runTest(null)));
 $('update-all').addEventListener('click', (e) => busy(e.currentTarget, async () => {
-  await send('updateAll');
-  toast('Подписки обновлены');
+  const r = await send('updateAll');
+  toast(r.failed ? `Обновлено: ${r.updated}, с ошибкой: ${r.failed}` : 'Подписки обновлены', !!r.failed);
 }));
 
 $('list').addEventListener('click', async (e) => {
   const t = e.target.closest('[data-test],[data-update],[data-remove-sub],[data-del-manual],[data-node],[data-toggle]');
   if (!t) return;
-  if (t.dataset.test) { e.stopPropagation(); return busy(t, () => send('test', { group: t.dataset.test })); }
+  if (t.dataset.test) { e.stopPropagation(); return busy(t, () => runTest(t.dataset.test)); }
   if (t.dataset.update) { e.stopPropagation(); return busy(t, async () => { await send('updateSub', { url: t.dataset.update }); toast('Подписка обновлена'); }); }
   if (t.dataset.removeSub) {
     e.stopPropagation();
-    if (t.dataset.armed) return send('removeSub', { id: t.dataset.removeSub });
+    if (t.dataset.armed) return send('removeSub', { id: t.dataset.removeSub }).catch(onError);
     t.dataset.armed = '1';
     t.title = 'Нажми ещё раз, чтобы удалить';
     toast('Нажми ещё раз, чтобы удалить подписку');
     setTimeout(() => { delete t.dataset.armed; }, 3000);
     return;
   }
-  if (t.dataset.delManual) { e.stopPropagation(); return send('removeManual', { id: t.dataset.delManual }); }
+  if (t.dataset.delManual) { e.stopPropagation(); return send('removeManual', { id: t.dataset.delManual }).catch(onError); }
   if (t.dataset.node) {
     if (t.classList.contains('unsupported')) return toast(t.title, true);
-    return send('select', { id: t.dataset.node }).catch((err) => toast(err.message, true));
+    return send('select', { id: t.dataset.node }).catch(onError);
   }
   if (t.dataset.toggle) {
     const id = t.dataset.toggle;
     if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
-    saveCollapsed();
+    writeStored('collapsed', [...collapsed]);
     renderList();
   }
 });
 
 $('list').addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.node) { e.preventDefault(); e.target.click(); }
+});
+
+$('setup').addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-copy],[data-check],[data-dismiss]');
+  if (!t) return;
+  if (t.dataset.copy !== undefined) {
+    try {
+      await navigator.clipboard.writeText(BRAND.installCommand);
+      toast('Команда скопирована. Вставь её в Терминал.');
+    } catch {
+      // Буфер обмена недоступен: выделяем текст, чтобы его можно было скопировать вручную.
+      const range = document.createRange();
+      range.selectNodeContents($('install-cmd'));
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      toast('Скопируй выделенную команду: Cmd+C или Ctrl+C');
+    }
+  } else if (t.dataset.check !== undefined) {
+    busy(t, () => checkHelper(true));
+  } else if (t.dataset.dismiss !== undefined) {
+    writeStored('dismissedHelper', helper?.latest || '');
+    renderSetup();
+  }
 });
 
 $('open-settings').addEventListener('click', openSettings);
@@ -416,12 +587,14 @@ $('save-settings').addEventListener('click', async () => {
         port: $('port').value,
         updateHours: $('update-hours').value,
         userAgent: $('user-agent').value,
+        sortByPing: $('sort-by-ping').checked,
+        showUnsupported: $('show-unsupported').checked,
       },
     });
     toast('Сохранено');
     closeSettings();
   } catch (e) {
-    toast(e.message, true);
+    onError(e);
   }
 });
 
@@ -429,18 +602,24 @@ $('save-settings').addEventListener('click', async () => {
 
 async function load() {
   const local = await chrome.storage.local.get({
-    subs: [], manual: [], selectedId: null, latency: {}, settings: {},
+    subs: [], manual: [], selectedId: null, latency: {}, settings: {}, remote: null,
   });
   const session = await chrome.storage.session.get({ status: { state: 'off' }, testing: null });
   state = {
     ...local,
-    settings: { mode: 'except', exceptList: '', onlyList: '', port: 10808, updateHours: 12, userAgent: BRAND.userAgent, ...local.settings },
+    settings: {
+      mode: 'except', exceptList: '', onlyList: '', port: 10808, updateHours: 12, userAgent: DEFAULT_UA,
+      sortByPing: true, showUnsupported: false, ...local.settings,
+    },
   };
   status = session.status;
-  testing = session.testing;
+  testing = session.testing && typeof session.testing === 'object' ? session.testing : null;
   render();
 }
 
 chrome.storage.onChanged.addListener(() => load());
 $('brand-name').textContent = BRAND.name;
-load();
+load().then(() => {
+  chrome.runtime.getPlatformInfo().then((p) => { platform = p; renderSetup(); }).catch(() => {});
+  checkHelper();
+});
