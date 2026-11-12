@@ -117,7 +117,18 @@ type coreProcess struct {
 	cmd     *exec.Cmd
 	done    chan struct{}
 	out     *tailBuffer
+	port    int  // локальный порт mixed-входа работающего ядра
 	stopped bool // остановлен нами, а не упал
+}
+
+// proxyPort возвращает порт работающего ядра или 0, если оно не запущено.
+func (c *coreProcess) proxyPort() int {
+	if !c.running() {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.port
 }
 
 func (c *coreProcess) running() bool {
@@ -197,7 +208,7 @@ func (c *coreProcess) start(path string, config []byte, port int) error {
 
 	done := make(chan struct{})
 	c.mu.Lock()
-	c.cmd, c.done, c.out, c.stopped = cmd, done, out, false
+	c.cmd, c.done, c.out, c.port, c.stopped = cmd, done, out, port, false
 	c.mu.Unlock()
 
 	ready := make(chan struct{})

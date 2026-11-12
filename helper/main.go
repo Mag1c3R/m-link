@@ -1,5 +1,6 @@
 // M-Link helper: native messaging host для расширения.
-// Запускает sing-box с конфигом от расширения, следит за процессом и меряет задержку узлов.
+// Запускает sing-box с конфигом от расширения, следит за процессом, меряет задержку узлов
+// и скачивает подписки (чтобы расширению не нужен был доступ ко всем сайтам).
 package main
 
 import (
@@ -15,7 +16,7 @@ import (
 	"sync"
 )
 
-const version = "0.1.0"
+const version = "1.0.0"
 
 type request struct {
 	ID        int             `json:"id"`
@@ -25,6 +26,7 @@ type request struct {
 	Nodes     []testNode      `json:"nodes"`
 	URL       string          `json:"url"`
 	TimeoutMs int             `json:"timeoutMs"`
+	UserAgent string          `json:"userAgent"`
 }
 
 type testNode struct {
@@ -121,6 +123,14 @@ func handle(req request) {
 		results, method := latencyTest(req.Nodes, req.URL, req.TimeoutMs)
 		reply(req.ID, map[string]any{"results": results, "method": method})
 
+	case "fetch":
+		res, err := fetchURL(req.URL, req.UserAgent)
+		if err != nil {
+			fail(req.ID, err)
+			return
+		}
+		replyChunked(req.ID, res)
+
 	default:
 		fail(req.ID, fmt.Errorf("неизвестная команда %q", req.Cmd))
 	}
@@ -131,7 +141,7 @@ func setupLogging() {
 	if err != nil {
 		base = os.TempDir()
 	}
-	dataDir = filepath.Join(base, "MClient")
+	dataDir = filepath.Join(base, "MLink")
 	_ = os.MkdirAll(dataDir, 0o700)
 	logPath := filepath.Join(dataDir, "helper.log")
 	if st, err := os.Stat(logPath); err == nil && st.Size() > 1<<20 {
@@ -147,7 +157,7 @@ func setupLogging() {
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
-		fmt.Println("m-client-helper", version)
+		fmt.Println("m-link-helper", version)
 		return
 	}
 	setupLogging()

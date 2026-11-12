@@ -1,14 +1,20 @@
 @echo off
 chcp 65001 >nul
-set HOST_NAME=com.mclient.helper
+rem Удаление помощника M-Link: программа, регистрация в браузерах, журнал и конфиг.
+if "%LOCALAPPDATA%"=="" exit /b 1
+if "%APPDATA%"=="" exit /b 1
+taskkill /IM m-link-helper.exe /F >nul 2>&1
 taskkill /IM m-client-helper.exe /F >nul 2>&1
 for %%K in (
-  "HKCU\Software\Google\Chrome\NativeMessagingHosts\%HOST_NAME%"
-  "HKCU\Software\Chromium\NativeMessagingHosts\%HOST_NAME%"
-  "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\%HOST_NAME%"
-) do reg delete %%K /f >nul 2>&1
-rmdir /S /Q "%LOCALAPPDATA%\MClient"
-rem Журнал и config.json помощника лежат в %APPDATA%\MClient.
-rmdir /S /Q "%APPDATA%\MClient" >nul 2>&1
-echo Помощник удалён.
+  "HKCU\Software\Google\Chrome\NativeMessagingHosts"
+  "HKCU\Software\Chromium\NativeMessagingHosts"
+  "HKCU\Software\Microsoft\Edge\NativeMessagingHosts"
+) do (
+  reg delete "%%~K\com.mlink.helper" /f >nul 2>&1
+  reg delete "%%~K\com.mclient.helper" /f >nul 2>&1
+)
+for %%D in ("%LOCALAPPDATA%\MLink" "%APPDATA%\MLink" "%LOCALAPPDATA%\MClient" "%APPDATA%\MClient") do (
+  if exist "%%~D" rmdir /S /Q "%%~D" >nul 2>&1
+)
+echo Помощник M-Link удалён.
 pause

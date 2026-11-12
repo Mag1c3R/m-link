@@ -1,3 +1,3 @@
-module mclient/helper
+module mlink/helper
 
 go 1.22
