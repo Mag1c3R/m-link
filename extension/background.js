@@ -37,8 +37,13 @@ function allNodes(state) {
   return [...state.subs.flatMap((s) => s.nodes || []), ...state.manual];
 }
 
+// Узел, к которому можно подключиться: не сообщение панели и не неподдерживаемый.
+function usable(n) {
+  return !!n && !n.unsupported && !n.info;
+}
+
 function findNode(state, id) {
-  return allNodes(state).find((n) => n.id === id && !n.unsupported) || null;
+  return allNodes(state).find((n) => n.id === id && usable(n)) || null;
 }
 
 // ---------- статус и значок ----------
@@ -144,7 +149,7 @@ async function withHelper(fn) {
   }
 }
 
-function callHelper(cmd, args = {}, timeoutMs = 15000) {
+function callHelper(cmd, args = {}, timeoutMs = 15000, { onResult } = {}) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
     let timer;
@@ -159,6 +164,7 @@ function callHelper(cmd, args = {}, timeoutMs = 15000) {
     pending.set(id, {
       parts: [],
       touch: arm,
+      onResult,
       resolve: (v) => { clearTimeout(timer); resolve(v); },
       reject: (e) => { clearTimeout(timer); reject(e); },
     });
@@ -179,6 +185,12 @@ function onHostMessage(msg) {
     if (msg.part !== undefined) {
       p.parts[msg.part] = msg.data;
       p.touch();
+      return;
+    }
+    // Промежуточный результат замера пинга по одному узлу.
+    if (Array.isArray(msg.result)) {
+      p.touch();
+      try { p.onResult?.(msg.result[0], msg.result[1]); } catch { /* не мешаем замеру */ }
       return;
     }
     pending.delete(msg.id);
@@ -249,8 +261,12 @@ async function doConnect() {
   const state = await loadState();
   let node = findNode(state, state.selectedId);
   if (!node) {
-    node = allNodes(state).find((n) => !n.unsupported);
-    if (!node) throw new Error('Сначала добавь подписку или узел');
+    node = allNodes(state).find(usable);
+    if (!node) {
+      const info = allNodes(state).find((n) => n.info);
+      if (info) throw new Error(`Нет серверов для подключения. Сообщение от сервиса: ${info.name}`);
+      throw new Error(state.subs.length || state.manual.length ? 'В подписке нет серверов, к которым можно подключиться' : 'Сначала добавь подписку или узел');
+    }
     await chrome.storage.local.set({ selectedId: node.id });
   }
   connectBusy++;
@@ -331,7 +347,9 @@ async function fetchSubscription(url, settings) {
   if (res.status < 200 || res.status >= 300) throw new Error(statusMessage(res.status));
   const text = decodeChunks(res.chunks, res.parts || 0);
   const { nodes, errors } = parseSubscription(text);
-  if (!nodes.length) {
+  // Пустой ответ с кодом 200 — это ответ панели (например, подписка заморожена), а не сбой:
+  // старый список серверов в таком случае показывать нельзя.
+  if (!nodes.length && text.trim()) {
     throw new Error(errors[0] || 'В подписке не нашлось ни одного узла');
   }
   const h = res.headers || {};
@@ -343,6 +361,7 @@ async function fetchSubscription(url, settings) {
     supportUrl: h['support-url'] || '',
     webPage: h['profile-web-page-url'] || '',
     updateHours: parseInt(h['profile-update-interval'] || '', 10) || null,
+    announce: parseProfileTitle(h['announce']).slice(0, 500),
   };
 }
 
@@ -357,7 +376,7 @@ async function tidyAfterNodesChange() {
   if (!state.selectedId || !ids.has(state.selectedId)) {
     const status = await getStatus();
     if (status.state !== 'on' && status.state !== 'connecting') {
-      patch.selectedId = nodes.find((n) => !n.unsupported)?.id || null;
+      patch.selectedId = nodes.find(usable)?.id || null;
     }
   }
   await chrome.storage.local.set(patch);
@@ -378,6 +397,7 @@ async function addOrUpdateSubscription(url) {
     supportUrl: data.supportUrl,
     webPage: data.webPage,
     updateHours: data.updateHours,
+    announce: data.announce || '',
     skipped: data.errors.length,
     updatedAt: Date.now(),
     error: null,
@@ -385,7 +405,15 @@ async function addOrUpdateSubscription(url) {
   const subs = prev ? fresh.subs.map((s) => (s.id === id ? sub : s)) : [...fresh.subs, sub];
   await chrome.storage.local.set({ subs });
   await tidyAfterNodesChange();
-  return { sub, added: data.nodes.filter((n) => !n.unsupported).length, unsupported: data.nodes.filter((n) => n.unsupported).length };
+  return { sub, ...countNodes(data.nodes) };
+}
+
+function countNodes(nodes) {
+  return {
+    added: nodes.filter(usable).length,
+    unsupported: nodes.filter((n) => n.unsupported).length,
+    messages: nodes.filter((n) => n.info).map((n) => n.name),
+  };
 }
 
 async function addInput(text) {
@@ -394,18 +422,22 @@ async function addInput(text) {
   if (urls.length && urls.length === lines.length) {
     let added = 0;
     let unsupported = 0;
+    let ok = 0;
+    const messages = [];
     let firstError = null;
     for (const url of urls) {
       try {
         const r = await addOrUpdateSubscription(url);
         added += r.added;
         unsupported += r.unsupported;
+        messages.push(...r.messages);
+        ok++;
       } catch (e) {
         firstError = firstError || e;
       }
     }
-    if (!added && !unsupported && firstError) throw firstError;
-    return { added, unsupported };
+    if (!ok && firstError) throw firstError;
+    return { added, unsupported, messages };
   }
   const { nodes, errors } = parseSubscription(text);
   if (!nodes.length) throw new Error(errors[0] || 'Не нашлось ни одной ссылки на узел или подписку');
@@ -414,31 +446,55 @@ async function addInput(text) {
   const manual = [...state.manual, ...nodes.filter((n) => !known.has(n.id))];
   await chrome.storage.local.set({ manual });
   await tidyAfterNodesChange();
-  return { added: nodes.filter((n) => !n.unsupported).length, unsupported: nodes.filter((n) => n.unsupported).length };
+  return countNodes(nodes);
 }
 
-async function updateAllSubscriptions() {
+// Как часто обновлять подписку: интервал из настроек, но не реже, чем просит сама панель
+// (заголовок profile-update-interval), иначе о заморозке или новых серверах узнаем поздно.
+function subIntervalMs(sub, settings) {
+  const hours = Math.min(settings.updateHours, sub.updateHours || Infinity);
+  return Math.max(1, hours) * 3600e3;
+}
+
+let updatingAll = null;
+
+// onlyStale: обновлять только устаревшие подписки (по интервалу или старше maxAgeMs).
+function updateAllSubscriptions({ onlyStale = false, maxAgeMs = null } = {}) {
+  if (updatingAll) return updatingAll; // уже идёт обновление: не запускаем второе параллельно
+  updatingAll = doUpdateAll(onlyStale, maxAgeMs).finally(() => { updatingAll = null; });
+  return updatingAll;
+}
+
+async function doUpdateAll(onlyStale, maxAgeMs) {
   const state = await loadState();
+  const now = Date.now();
+  const subs = state.subs.filter((sub) => {
+    if (!onlyStale) return true;
+    const age = now - (sub.updatedAt || 0);
+    return age >= subIntervalMs(sub, state.settings) || (maxAgeMs != null && age >= maxAgeMs);
+  });
+  if (!subs.length) return { updated: 0, failed: 0 };
   let failed = 0;
   let lastError = null;
   // Держим помощник открытым на всё обновление, чтобы не запускать его заново для каждой подписки.
   await withHelper(async () => {
-    for (const sub of state.subs) {
+    for (const sub of subs) {
       try {
         await addOrUpdateSubscription(sub.url);
       } catch (e) {
         failed++;
         lastError = e;
         const fresh = await loadState();
+        // Время попытки запоминаем, чтобы не повторять её при каждом открытии popup.
         await chrome.storage.local.set({
-          subs: fresh.subs.map((s) => (s.id === sub.id ? { ...s, error: e.message } : s)),
+          subs: fresh.subs.map((s) => (s.id === sub.id ? { ...s, error: e.message, updatedAt: Date.now() } : s)),
         });
         if (e.code === 'no_helper' || e.code === 'old_helper') break; // остальные упадут так же
       }
     }
   });
-  if (failed && failed === state.subs.length && lastError) throw lastError;
-  return { updated: state.subs.length - failed, failed };
+  if (!onlyStale && failed && failed === subs.length && lastError) throw lastError;
+  return { updated: subs.length - failed, failed };
 }
 
 async function removeSubscription(id) {
@@ -462,25 +518,64 @@ async function testLatency(group) {
   else if (group) nodes = state.subs.find((s) => s.id === group)?.nodes || [];
   else nodes = allNodes(state);
   // Группы «Авто» сами выбирают лучший узел внутри sing-box, отдельно их не меряем.
-  nodes = nodes.filter((n) => !n.unsupported && !n.members);
+  nodes = nodes.filter((n) => usable(n) && !n.members);
   if (!nodes.length) return { results: {} };
-  await chrome.storage.session.set({ testing: { group: group || 'all', count: nodes.length } });
+
+  // Старые значения убираем, чтобы было видно, какие узлы уже перемерены.
+  const ids = new Set(nodes.map((n) => n.id));
+  const start = await loadState();
+  const cleared = Object.fromEntries(Object.entries(start.latency).filter(([id]) => !ids.has(id)));
+  await chrome.storage.local.set({ latency: cleared });
+  const testing = { group: group || 'all', count: nodes.length, done: 0 };
+  await chrome.storage.session.set({ testing });
+
+  // Результаты приходят по одному; сохраняем их пачками, чтобы popup показывал пинг сразу,
+  // но не перерисовывался сотни раз в секунду.
+  let buffer = {};
+  let flushTimer = null;
+  let flushing = Promise.resolve();
+  const flush = () => {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+    const batch = buffer;
+    buffer = {};
+    if (!Object.keys(batch).length) return flushing;
+    testing.done += Object.keys(batch).length;
+    flushing = flushing.then(async () => {
+      const fresh = await loadState();
+      await chrome.storage.local.set({ latency: { ...fresh.latency, ...batch } });
+      await chrome.storage.session.set({ testing: { ...testing } });
+    });
+    return flushing;
+  };
+  const onResult = (id, ms) => {
+    if (!ids.has(id)) return;
+    buffer[id] = ms;
+    if (!flushTimer) flushTimer = setTimeout(flush, 250);
+  };
+
   try {
     let res;
     try {
       res = await withHelper(() => callHelper('test', {
         url: TEST_URL,
         timeoutMs: 5000,
+        stream: true,
         nodes: nodes.map((n) => ({ id: n.id, outbound: n.outbound, server: n.server, port: n.port })),
-      }, 180000));
+      }, 180000, { onResult }));
     } catch (e) {
       throw helperError(e, 'test');
     }
+    buffer = {};
+    await flush();
+    // Итог помощника полный: на случай, если какие-то промежуточные сообщения потерялись.
     const fresh = await loadState();
     await chrome.storage.local.set({ latency: { ...fresh.latency, ...res.results } });
     const alive = Object.values(res.results).filter((ms) => ms > 0).length;
     return { tested: nodes.length, alive, method: res.method };
   } finally {
+    clearTimeout(flushTimer);
+    await flushing.catch(() => {});
     await chrome.storage.session.set({ testing: null });
   }
 }
@@ -563,7 +658,10 @@ async function refreshRemote(force = false) {
 }
 
 async function scheduleAlarms(settings) {
-  chrome.alarms.create('update-subs', { periodInMinutes: settings.updateHours * 60 });
+  // Раз в час проверяем, какие подписки пора обновить (у каждой свой интервал).
+  if ((await chrome.alarms.get('update-subs'))?.periodInMinutes !== 60) {
+    chrome.alarms.create('update-subs', { periodInMinutes: 60 });
+  }
   if (!(await chrome.alarms.get('remote-config'))) {
     chrome.alarms.create('remote-config', { periodInMinutes: 24 * 60 });
   }
@@ -577,6 +675,8 @@ const handlers = {
   add: (m) => addInput(m.text),
   updateSub: (m) => addOrUpdateSubscription(m.url),
   updateAll: () => updateAllSubscriptions(),
+  // Popup открыли: обновляем подписки старше 30 минут, не задерживая ответ.
+  refreshStale: () => { updateAllSubscriptions({ onlyStale: true, maxAgeMs: 30 * 60e3 }).catch(() => {}); return {}; },
   removeSub: (m) => removeSubscription(m.id),
   removeManual: (m) => removeManual(m.id),
   select: (m) => selectNode(m.id),
@@ -596,7 +696,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 chrome.alarms.onAlarm.addListener((a) => {
-  if (a.name === 'update-subs') updateAllSubscriptions().catch(() => {});
+  if (a.name === 'update-subs') updateAllSubscriptions({ onlyStale: true }).catch(() => {});
   if (a.name === 'remote-config') refreshRemote(true);
 });
 

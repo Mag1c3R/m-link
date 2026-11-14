@@ -3,6 +3,7 @@
 #   POST /save/<имя>          — сохраняет тело запроса в tests/out/<имя>
 #   GET  /fake-sub            — отдаёт подписку с заголовками панели: tests/out/sub.txt, если он есть,
 #                               иначе маленькую тестовую. /fake-sub-ua — User-Agent последнего запроса.
+#   POST /fake-freeze?fmt=X   — «замораживает» /fake-sub: X = xray | links | empty; без fmt — размораживает.
 #
 # Мост к настоящему помощнику для tests/e2e.html (заменяет chrome.runtime.connectNative):
 #   POST /native/open         — запускает помощник, отвечает {"id": n}
@@ -24,7 +25,7 @@ def default_helper():
 
 HELPER = os.environ.get('MLINK_HELPER') or default_helper()
 sessions = {}
-state = {'next': 1, 'ua': ''}
+state = {'next': 1, 'ua': '', 'frozen': ''}
 lock = threading.Lock()
 
 class Session:
@@ -80,6 +81,19 @@ SMALL_SUB = '\n'.join([
     'vless://11111111-2222-3333-4444-555555555555@192.0.2.3:443?security=tls&type=xhttp#Test XHTTP',
 ]).encode()
 
+# Как панели отвечают на замороженную подписку: сообщение вместо серверов.
+FROZEN = {
+    'xray': json.dumps([
+        {'remarks': '⛔ Подписка заморожена', 'outbounds': [{'protocol': 'blackhole', 'tag': 'block'}]},
+        {'remarks': '👉 Разморозить: @mag1c3r_vpn_bot', 'outbounds': [{'protocol': 'vless', 'tag': 'proxy', 'settings': {'vnext': [{'address': '0.0.0.0', 'port': 1, 'users': [{'id': '00000000-0000-0000-0000-000000000000'}]}]}}]},
+    ], ensure_ascii=False).encode(),
+    'links': base64.b64encode('\n'.join([
+        'vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1?type=tcp#⛔ Подписка заморожена',
+        'vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1?type=tcp#👉 Разморозить: @mag1c3r_vpn_bot',
+    ]).encode()),
+    'empty': b'',
+}
+
 class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -106,10 +120,12 @@ class H(http.server.SimpleHTTPRequestHandler):
             state['ua'] = self.headers.get('User-Agent', '')
             p = os.path.join(outdir, 'sub.txt')
             data = open(p, 'rb').read() if os.path.exists(p) else SMALL_SUB
+            data = FROZEN.get(state['frozen'], data)
             return self.reply(200, data, 'text/plain; charset=utf-8', [
                 ('Profile-Title', 'base64:' + base64.b64encode('Тестовая подписка'.encode()).decode()),
                 ('Subscription-Userinfo', 'upload=1073741824; download=5368709120; total=107374182400; expire=1830297600'),
                 ('Profile-Update-Interval', '3'),
+                ('Announce', 'base64:' + base64.b64encode('⚠️ Тестовое объявление панели'.encode()).decode()),
             ])
         if path == '/fake-sub-ua':
             return self.reply(200, state['ua'].encode(), 'text/plain; charset=utf-8')
@@ -129,6 +145,10 @@ class H(http.server.SimpleHTTPRequestHandler):
             os.makedirs(outdir, exist_ok=True)
             with open(os.path.join(outdir, m.group(1)), 'wb') as f:
                 f.write(self.body())
+            return self.reply(204)
+        if path == '/fake-freeze':
+            q = self.path.split('?', 1)[1] if '?' in self.path else ''
+            state['frozen'] = dict(x.split('=', 1) for x in q.split('&') if '=' in x).get('fmt', '')
             return self.reply(204)
         if path == '/native/open':
             if not os.path.exists(HELPER):

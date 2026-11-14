@@ -410,7 +410,26 @@ export function protoLabel(ob) {
   return label;
 }
 
+// Адреса, которые панели ставят в «узлы»-заглушки: такой узел никуда не подключается,
+// а его название — это сообщение пользователю («Подписка заморожена», «Продлите подписку» и т. п.).
+const PLACEHOLDER_HOSTS = new Set(['', '0.0.0.0', '127.0.0.1', '::', '::1', 'localhost']);
+
+export function isPlaceholder(host, port) {
+  return PLACEHOLDER_HOSTS.has(String(host || '').trim().toLowerCase()) || !Number(port);
+}
+
+function makeInfo(raw, text) {
+  return {
+    id: hashString('info:' + raw),
+    name: String(text || '').trim() || 'Сообщение от сервиса',
+    type: 'info',
+    label: '',
+    info: true,
+  };
+}
+
 function makeNode(raw, ob, name, host, port) {
+  if (isPlaceholder(host, port)) return makeInfo(raw, name);
   return {
     id: hashString(raw),
     name: (name || '').trim() || `${host}:${port}`,
@@ -595,15 +614,21 @@ function fromXrayJson(list) {
   for (const cfg of configs) {
     const name = cfg.remarks || '';
     const proxies = cfg.outbounds.filter((o) => o && !XRAY_SKIP.has(o.protocol));
-    if (!proxies.length) continue;
     const raw = JSON.stringify(proxies) + name;
+    // Конфиг без выхода в сеть — это сообщение панели (например, о заморозке подписки).
+    if (!proxies.length) {
+      if (name.trim()) nodes.push(makeInfo(raw, name));
+      continue;
+    }
 
     if (proxies.length === 1) {
       try {
         const ob = xrayOutboundToSingbox(proxies[0]);
         nodes.push(makeNode(raw, ob, name, ob.server, ob.server_port));
       } catch (e) {
-        if (e instanceof Unsupported) nodes.push(makeUnsupported(raw, proxies[0].protocol, name, e.message));
+        const srv = xrayServer(proxies[0].settings);
+        if (isPlaceholder(srv.address, srv.port)) nodes.push(makeInfo(raw, name));
+        else if (e instanceof Unsupported) nodes.push(makeUnsupported(raw, proxies[0].protocol, name, e.message));
         else nodes.push(makeUnsupported(raw, proxies[0].protocol, name, 'Не удалось разобрать: ' + e.message));
       }
       continue;
@@ -611,11 +636,21 @@ function fromXrayJson(list) {
 
     // Несколько узлов в одном конфиге (балансировщик «Авто») -> группа urltest в sing-box.
     const members = [];
+    let placeholders = 0;
     for (const o of proxies) {
-      try { members.push({ ...xrayOutboundToSingbox(o), tag: 'm' + members.length }); } catch { /* пропускаем неподдерживаемые */ }
+      try {
+        const ob = xrayOutboundToSingbox(o);
+        if (isPlaceholder(ob.server, ob.server_port)) { placeholders++; continue; }
+        members.push({ ...ob, tag: 'm' + members.length });
+      } catch {
+        const srv = xrayServer(o.settings);
+        if (isPlaceholder(srv.address, srv.port)) placeholders++;
+        /* остальные неподдерживаемые пропускаем */
+      }
     }
     if (!members.length) {
-      nodes.push(makeUnsupported(raw, 'group', name, 'В группе нет узлов, которые умеет sing-box'));
+      if (placeholders) nodes.push(makeInfo(raw, name));
+      else nodes.push(makeUnsupported(raw, 'group', name, 'В группе нет узлов, которые умеет sing-box'));
       continue;
     }
     const obs = cfg.burstObservatory?.pingConfig || cfg.observatory || {};

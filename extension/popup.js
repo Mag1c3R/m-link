@@ -13,6 +13,8 @@ let filter = '';
 let timerId = null;
 let helper = null; // ответ helperInfo: установлен ли помощник и какой версии
 let platform = null; // { os, arch }
+// Порядок узлов на момент запуска замера: пока пинг приходит, строки не прыгают.
+const orderSnapshot = new Map();
 const collapsed = new Set(readStored('collapsed', []));
 
 function readStored(key, fallback) {
@@ -221,8 +223,15 @@ function renderHero() {
   }
 }
 
-function nodeRow(n, canDelete) {
+function nodeRow(n, canDelete, groupId) {
+  if (n.info) {
+    return `<div class="node info" title="Сообщение от сервиса">
+      <span class="info-ic">${ICON.info}</span>
+      <span class="node-name">${esc(n.name)}</span>
+    </div>`;
+  }
   const ms = state.latency[n.id];
+  const waiting = ms == null && isTesting(groupId) && !n.unsupported && !n.members;
   const sel = n.id === state.selectedId;
   const cls = ['node', sel && 'selected', sel && status.state === 'on' && 'active', n.unsupported && 'unsupported']
     .filter(Boolean).join(' ');
@@ -231,7 +240,7 @@ function nodeRow(n, canDelete) {
     <span class="dot"></span>
     <span class="node-name">${esc(n.name)}</span>
     <span class="badge">${esc(n.unsupported ? 'не поддерж.' : n.label)}</span>
-    <span class="ping ${pingClass(ms)}">${pingText(ms)}</span>
+    <span class="ping ${waiting ? 'wait' : pingClass(ms)}">${waiting ? '…' : pingText(ms)}</span>
     ${canDelete ? `<button class="icon-btn del" data-del-manual="${esc(n.id)}" title="Удалить узел" aria-label="Удалить узел">${ICON.x}</button>` : ''}
   </div>`;
 }
@@ -242,6 +251,7 @@ const ICON = {
   refresh: '<svg viewBox="0 0 24 24" width="15" height="15"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" width="15" height="15"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg>',
   x: '<svg viewBox="0 0 24 24" width="13" height="13"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>',
+  info: '<svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 11v5M12 8h.01"/></svg>',
 };
 
 function matches(n) {
@@ -250,14 +260,21 @@ function matches(n) {
   return n.name.toLowerCase().includes(q) || (n.label || '').toLowerCase().includes(q) || (n.server || '').includes(q);
 }
 
-// Порядок и видимость узлов в группе: скрываем неподдерживаемые, после замера ставим быстрые выше.
-function visibleNodes(nodes) {
+// Порядок и видимость узлов в группе: сообщения сервиса сверху, неподдерживаемые скрыты,
+// после замера быстрые узлы выше. Во время замера держим порядок, который был до него.
+function visibleNodes(nodes, groupId) {
   const s = state.settings;
   let list = nodes.map((n, i) => ({ n, i }));
   if (!s.showUnsupported) list = list.filter(({ n }) => !n.unsupported || n.id === state.selectedId);
-  list = list.filter(({ n }) => matches(n));
-  if (s.sortByPing) {
+  list = list.filter(({ n }) => n.info || matches(n));
+  const snap = isTesting(groupId) ? orderSnapshot.get(groupId) : null;
+  if (snap) {
+    const pos = new Map(snap.map((id, k) => [id, k]));
+    const at = ({ n, i }) => (n.info ? -1 : pos.has(n.id) ? pos.get(n.id) : snap.length + i);
+    list.sort((a, b) => at(a) - at(b));
+  } else if (s.sortByPing) {
     const rank = ({ n }) => {
+      if (n.info) return -2; // сообщения сервиса — самыми первыми
       if (n.members) return -1; // группы «Авто» всегда сверху
       if (n.unsupported) return 4e6;
       const ms = state.latency[n.id];
@@ -272,17 +289,17 @@ function visibleNodes(nodes) {
 
 function countText(nodes) {
   const bad = nodes.filter((n) => n.unsupported).length;
-  const good = nodes.length - bad;
+  const good = nodes.filter((n) => !n.unsupported && !n.info).length;
   return `${good} узл.` + (bad && !state.settings.showUnsupported ? ` (+${bad} не поддерж.)` : '');
 }
 
-function groupHtml({ id, name, meta, nodes, traffic, canDelete, actions }) {
-  const shown = visibleNodes(nodes);
-  if (filter && !shown.length) return '';
+function groupHtml({ id, name, meta, nodes, traffic, canDelete, actions, announce }) {
+  const shown = visibleNodes(nodes, id);
+  if (filter && !shown.some((n) => !n.info)) return '';
   const isCollapsed = collapsed.has(id) && !filter;
   const body = shown.length
-    ? shown.map((n) => nodeRow(n, canDelete)).join('')
-    : '<div class="node unsupported"><span class="node-name">Нет узлов, которые поддерживает расширение</span></div>';
+    ? shown.map((n) => nodeRow(n, canDelete, id)).join('')
+    : `<div class="node unsupported"><span class="node-name">${nodes.length ? 'Нет узлов, которые поддерживает расширение' : 'Сервис не прислал ни одного сервера'}</span></div>`;
   return `<div class="group ${isCollapsed ? 'collapsed' : ''}" data-group="${esc(id)}">
     <div class="group-head" data-toggle="${esc(id)}">
       ${ICON.chev}
@@ -293,6 +310,7 @@ function groupHtml({ id, name, meta, nodes, traffic, canDelete, actions }) {
       ${actions}
     </div>
     ${traffic != null ? `<div class="traffic"><i style="width:${Math.min(100, traffic)}%"></i></div>` : ''}
+    ${announce ? `<div class="announce">${esc(announce)}</div>` : ''}
     <div class="nodes">${body}</div>
   </div>`;
 }
@@ -326,6 +344,7 @@ function renderList() {
       meta: subMeta(sub),
       nodes: sub.nodes,
       traffic,
+      announce: sub.announce,
       canDelete: false,
       actions: `
         <button class="icon-btn ${isTesting(sub.id) ? 'spin' : ''}" data-test="${esc(sub.id)}" title="Проверить задержку" aria-label="Проверить задержку">${ICON.bolt}</button>
@@ -373,8 +392,8 @@ function renderFoot() {
   const p = promo();
   const hasAny = state.subs.length || state.manual.length;
   const left = testing
-    ? `Замер пинга: ${testing.count} узл.…`
-    : `${allNodes().filter((n) => !n.unsupported).length} узлов`;
+    ? `Замер пинга: ${testing.done || 0} из ${testing.count}`
+    : `${allNodes().filter((n) => !n.unsupported && !n.info).length} узлов`;
   const right = p.enabled && hasAny ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.button)} →</a>` : '';
   $('foot').innerHTML = `<span>${esc(left)}</span>${right}`;
 }
@@ -486,7 +505,8 @@ $('add-submit').addEventListener('click', async () => {
     const r = await send('add', { text });
     $('add-input').value = '';
     $('add-panel').hidden = true;
-    toast(`Добавлено узлов: ${r.added}` + (r.unsupported ? `. Ещё ${r.unsupported} не поддерживаются` : ''));
+    if (!r.added && r.messages?.length) toast(`Серверов нет. Сообщение от сервиса: ${r.messages[0]}`, true);
+    else toast(`Добавлено узлов: ${r.added}` + (r.unsupported ? `. Ещё ${r.unsupported} не поддерживаются` : ''));
   } catch (e) {
     onError(e);
   } finally {
@@ -501,9 +521,24 @@ $('add-input').addEventListener('keydown', (e) => {
 
 $('search').addEventListener('input', (e) => { filter = e.target.value.trim(); renderList(); });
 
+// Запоминаем текущий порядок строк, чтобы он не менялся, пока приходят результаты.
+function snapshotOrder(group) {
+  for (const el of $('list').querySelectorAll('.group[data-group]')) {
+    const gid = el.dataset.group;
+    if (group && gid !== group) continue;
+    orderSnapshot.set(gid, [...el.querySelectorAll('.node[data-node]')].map((r) => r.dataset.node));
+  }
+}
+
 async function runTest(group) {
-  const r = await send('test', { group });
-  if (r.tested) toast(`Работают ${r.alive} из ${r.tested}`);
+  snapshotOrder(group);
+  try {
+    const r = await send('test', { group });
+    if (r.tested) toast(`Работают ${r.alive} из ${r.tested}`);
+  } finally {
+    if (group) orderSnapshot.delete(group); else orderSnapshot.clear();
+    renderList();
+  }
 }
 
 $('test-all').addEventListener('click', (e) => busy(e.currentTarget, () => runTest(null)));
@@ -622,4 +657,7 @@ $('brand-name').textContent = BRAND.name;
 load().then(() => {
   chrome.runtime.getPlatformInfo().then((p) => { platform = p; renderSetup(); }).catch(() => {});
   checkHelper();
+  // Подписки старше 30 минут обновляются в фоне, пока popup открыт: так заморозка
+  // или новые серверы видны сразу, а не через несколько часов.
+  if (state.subs.length) send('refreshStale').catch(() => {});
 });

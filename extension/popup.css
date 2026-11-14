@@ -208,6 +208,16 @@ a.btn { text-decoration: none; display: inline-block; }
 .ping.mid { color: var(--warn); }
 .ping.bad { color: var(--bad); }
 .node .del { width: 22px; height: 22px; opacity: 0; }
+.ping.wait { color: var(--muted); animation: blink 1s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: .3; } }
+.node.info { cursor: default; align-items: flex-start; background: var(--accent-soft); }
+.node.info:hover { background: var(--accent-soft); }
+.node.info .node-name { white-space: normal; overflow: visible; font-weight: 600; }
+.node.info .info-ic { color: var(--accent); flex: none; margin-top: 1px; display: inline-flex; }
+.announce {
+  margin: 0 12px 8px; padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.35;
+  background: var(--accent-soft); color: var(--text); white-space: pre-line;
+}
 .node:hover .del { opacity: 1; }
 
 .empty { text-align: center; padding: 18px 8px 6px; color: var(--muted); }

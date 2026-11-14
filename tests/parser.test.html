@@ -108,6 +108,23 @@ t('xray json subscription', () => {
 t('sing-box json not mistaken for xray', () => {
   eq('sing-box json still works', parseSubscription(JSON.stringify({ outbounds: [{ type: 'vless', tag: 'A', server: 'a', server_port: 1, uuid: 'u' }] })).nodes.length, 1);
 });
+t('panel placeholders (frozen / expired subscription)', () => {
+  const links = parseSubscription([
+    'vless://00000000-0000-0000-0000-000000000000@0.0.0.0:1?encryption=none&type=tcp#%E2%9B%94%20%D0%9F%D0%BE%D0%B4%D0%BF%D0%B8%D1%81%D0%BA%D0%B0%20%D0%B7%D0%B0%D0%BC%D0%BE%D1%80%D0%BE%D0%B6%D0%B5%D0%BD%D0%B0',
+    'trojan://x@127.0.0.1:1#Продлите в боте @bot',
+    'vless://u@1.2.3.4:443?security=tls#Real',
+  ].join('\n')).nodes;
+  eq('links: placeholders become info', links.map((n) => [n.name, !!n.info]), [['⛔ Подписка заморожена', true], ['Продлите в боте @bot', true], ['Real', false]]);
+  eq('info node has no outbound', links[0].outbound, undefined);
+  const xray = parseSubscription(JSON.stringify([
+    { remarks: '⛔ Подписка заморожена', outbounds: [{ protocol: 'blackhole', tag: 'block' }] },
+    { remarks: 'Продлите: @bot', outbounds: [{ protocol: 'vless', tag: 'proxy', settings: { vnext: [{ address: '0.0.0.0', port: 1, users: [{ id: '00000000-0000-0000-0000-000000000000' }] }] } }, { protocol: 'freedom', tag: 'direct' }] },
+    { remarks: 'Bad placeholder', outbounds: [{ protocol: 'vless', settings: { vnext: [{ address: '0.0.0.0', port: 0, users: [{ id: 'x' }] }] }, streamSettings: { network: 'xhttp' } }] },
+    { remarks: 'Авто', outbounds: [{ protocol: 'vless', tag: 'a', settings: { vnext: [{ address: '0.0.0.0', port: 1, users: [{ id: 'x' }] }] } }, { protocol: 'vless', tag: 'b', settings: { vnext: [{ address: '127.0.0.1', port: 1, users: [{ id: 'x' }] }] } }] },
+    { remarks: '', outbounds: [{ protocol: 'freedom' }] },
+  ])).nodes;
+  eq('xray: placeholders become info', xray.map((n) => [n.name, !!n.info]), [['⛔ Подписка заморожена', true], ['Продлите: @bot', true], ['Bad placeholder', true], ['Авто', true]]);
+});
 t('clash yaml message', () => {
   eq('clash yaml rejected with hint', parseSubscription('proxies:\n  - name: a').errors.length, 1);
 });
