@@ -22,5 +22,6 @@ func isCoreProcess(pid int) bool {
 	cmd := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/FO", "CSV", "/NH")
 	hideWindow(cmd)
 	out, err := cmd.Output()
-	return err == nil && strings.Contains(strings.ToLower(string(out)), "sing-box")
+	name := strings.ToLower(string(out))
+	return err == nil && (strings.Contains(name, "sing-box") || strings.Contains(name, "xray"))
 }

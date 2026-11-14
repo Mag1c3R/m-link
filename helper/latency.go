@@ -20,8 +20,9 @@ var udpTypes = map[string]bool{"hysteria2": true, "hysteria": true, "tuic": true
 // onResult вызывается для каждого узла сразу после его замера (может быть nil).
 type resultFunc func(id string, ms int)
 
-// latencyTest меряет реальную задержку через временный sing-box с Clash API.
-// Если ядро недоступно или конфиг не прошёл, откатывается на TCP-пинг до сервера.
+// latencyTest меряет реальную задержку: узлы sing-box — через временный sing-box с Clash API,
+// узлы XHTTP — через временный xray. Если ядро недоступно или конфиг не прошёл,
+// для этих узлов откатывается на TCP-пинг до сервера.
 func latencyTest(nodes []testNode, testURL string, timeoutMs int, onResult resultFunc) (map[string]int, string) {
 	if testURL == "" {
 		testURL = "https://www.gstatic.com/generate_204"
@@ -29,14 +30,59 @@ func latencyTest(nodes []testNode, testURL string, timeoutMs int, onResult resul
 	if timeoutMs <= 0 {
 		timeoutMs = 5000
 	}
-	if path, err := findCore(); err == nil {
-		res, err := urlTest(path, nodes, testURL, timeoutMs, onResult)
-		if err == nil {
-			return res, "urltest"
+	var sb, xr []testNode
+	for _, n := range nodes {
+		if normalizeCore(n.Core) == coreXray {
+			xr = append(xr, n)
+		} else {
+			sb = append(sb, n)
 		}
-		log.Printf("urltest failed, falling back to tcp: %v", err)
 	}
-	return tcpTest(nodes, timeoutMs, onResult), "tcp"
+
+	results := map[string]int{}
+	var mu sync.Mutex
+	method := "urltest"
+	merge := func(part map[string]int, m string) {
+		mu.Lock()
+		defer mu.Unlock()
+		for k, v := range part {
+			results[k] = v
+		}
+		if m == "tcp" {
+			method = "tcp"
+		}
+	}
+	run := func(list []testNode, kind string, measure func(path string) (map[string]int, error)) {
+		if len(list) == 0 {
+			return
+		}
+		if path, err := findBinary(kind); err == nil {
+			res, err := measure(path)
+			if err == nil {
+				merge(res, "urltest")
+				return
+			}
+			log.Printf("%s urltest failed, falling back to tcp: %v", kind, err)
+		}
+		merge(tcpTest(list, timeoutMs, onResult), "tcp")
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		run(sb, coreSingBox, func(path string) (map[string]int, error) {
+			return urlTest(path, sb, testURL, timeoutMs, onResult)
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		run(xr, coreXray, func(path string) (map[string]int, error) {
+			return xrayTest(path, xr, testURL, timeoutMs, onResult)
+		})
+	}()
+	wg.Wait()
+	return results, method
 }
 
 func freePort() (int, error) {

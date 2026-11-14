@@ -16,7 +16,8 @@ import (
 	"sync"
 )
 
-const version = "1.0.2"
+// version можно переопределить при сборке: -ldflags "-X main.version=1.2.3".
+var version = "1.1.0"
 
 type request struct {
 	ID        int             `json:"id"`
@@ -28,11 +29,14 @@ type request struct {
 	TimeoutMs int             `json:"timeoutMs"`
 	UserAgent string          `json:"userAgent"`
 	Stream    bool            `json:"stream"`
+	Core      string          `json:"core"`
 }
 
 type testNode struct {
 	ID       string         `json:"id"`
 	Outbound map[string]any `json:"outbound"`
+	Core     string         `json:"core"` // "xray" — узел для xray (XHTTP), иначе sing-box
+	Xray     map[string]any `json:"xray"` // outbound в формате xray
 	Server   string         `json:"server"`
 	Port     int            `json:"port"`
 }
@@ -88,12 +92,16 @@ func fail(id int, err error) {
 func handle(req request) {
 	switch req.Cmd {
 	case "hello":
-		info := map[string]any{"version": version}
+		// features: что умеет этот помощник; расширение по ним решает, какие функции включать.
+		info := map[string]any{"version": version, "features": []string{"fetch", "stream", "xray", "stats", "update"}}
 		if path, err := findCore(); err != nil {
 			info["coreError"] = err.Error()
 		} else {
 			info["corePath"] = path
 			info["coreVersion"] = coreVersion(path)
+		}
+		if path, err := findBinary(coreXray); err == nil {
+			info["xrayVersion"] = coreVersion(path)
 		}
 		reply(req.ID, info)
 
@@ -102,16 +110,29 @@ func handle(req request) {
 			fail(req.ID, errors.New("нет конфига или порта"))
 			return
 		}
-		path, err := findCore()
+		kind := normalizeCore(req.Core)
+		path, err := findBinary(kind)
 		if err != nil {
 			fail(req.ID, err)
 			return
 		}
-		if err := core.start(path, req.Config, req.Port); err != nil {
+		if err := core.start(kind, path, req.Config, req.Port); err != nil {
 			fail(req.ID, err)
 			return
 		}
-		reply(req.ID, map[string]any{"coreVersion": coreVersion(path)})
+		reply(req.ID, map[string]any{"coreVersion": coreVersion(path), "core": kind})
+
+	case "stats":
+		down, up, ok := core.stats()
+		reply(req.ID, map[string]any{"available": ok, "down": down, "up": up})
+
+	case "update":
+		res, err := selfUpdate()
+		if err != nil {
+			fail(req.ID, err)
+			return
+		}
+		reply(req.ID, res)
 
 	case "stop":
 		core.stop()
@@ -171,6 +192,7 @@ func main() {
 	}
 	setupLogging()
 	log.Printf("helper %s started, args=%v", version, os.Args[1:])
+	cleanupOldFiles()
 
 	in := bufio.NewReader(os.Stdin)
 	for {

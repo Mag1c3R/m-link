@@ -2,8 +2,9 @@
 # Собирает помощник под все платформы и упаковывает архивы для релиза.
 #
 #   sh build.sh                      — только помощник, в dist/m-link-helper-<платформа>/
-#   SINGBOX_DIR=/путь sh build.sh    — плюс официальный sing-box из распакованных релизов
-#                                      (папки вида sing-box-<версия>-<платформа>/) и архивы:
+#   SINGBOX_DIR=/путь XRAY_DIR=/путь sh build.sh
+#                                    — плюс официальные sing-box и xray-core из распакованных релизов
+#                                      (папки sing-box-<версия>-<платформа>/ и xray-<платформа>/) и архивы:
 #                                      .tar.gz для macOS/Linux, .zip для Windows
 #
 # Список ID расширений берётся из install/extension-ids.txt.
@@ -15,6 +16,7 @@ IDS=$(grep -v '^#' install/extension-ids.txt | grep -E '^[a-p]{32}$' | tr '\n' '
 if [ -z "$IDS" ]; then echo "install/extension-ids.txt пуст" >&2; exit 1; fi
 ORIGINS=$(for id in $IDS; do printf '"chrome-extension://%s/", ' "$id"; done | sed 's/, $//')
 SINGBOX_DIR="${SINGBOX_DIR:-}"
+XRAY_DIR="${XRAY_DIR:-}"
 mkdir -p dist
 find dist -mindepth 1 -delete
 for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
@@ -44,6 +46,16 @@ for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; d
     cp "$sb/LICENSE" "$out/LICENSE-sing-box.txt"
     sbver=$(basename "$sb" | sed "s/^sing-box-//; s/-$plat\$//")
     printf 'В архив входит неизменённый sing-box %s из официального релиза:\nhttps://github.com/SagerNet/sing-box/releases/tag/v%s\nЛицензия: GPL-3.0-or-later (LICENSE-sing-box.txt). Исходный код:\nhttps://github.com/SagerNet/sing-box/tree/v%s\n' "$sbver" "$sbver" "$sbver" > "$out/THIRD_PARTY.txt"
+    if [ -n "$XRAY_DIR" ]; then
+      xr="$XRAY_DIR/xray-$plat"
+      if [ ! -d "$xr" ]; then echo "нет xray для $plat в $XRAY_DIR" >&2; exit 1; fi
+      for f in xray xray.exe; do
+        if [ -f "$xr/$f" ]; then cp "$xr/$f" "$out/"; fi
+      done
+      cp "$xr/LICENSE" "$out/LICENSE-xray.txt"
+      xrver=$(cat "$XRAY_DIR/VERSION")
+      printf '\nТакже входит неизменённый Xray-core %s из официального релиза:\nhttps://github.com/XTLS/Xray-core/releases/tag/%s\nЛицензия: MPL-2.0 (LICENSE-xray.txt). Исходный код:\nhttps://github.com/XTLS/Xray-core/tree/%s\n' "$xrver" "$xrver" "$xrver" >> "$out/THIRD_PARTY.txt"
+    fi
     if [ "$os" = windows ]; then
       (cd dist && zip -qry "$name.zip" "$name")
     else

@@ -16,5 +16,6 @@ func terminate(p *os.Process) { _ = p.Signal(syscall.SIGTERM) }
 
 func isCoreProcess(pid int) bool {
 	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-	return err == nil && strings.Contains(string(out), "sing-box")
+	name := string(out)
+	return err == nil && (strings.Contains(name, "sing-box") || strings.Contains(name, "xray"))
 }

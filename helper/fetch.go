@@ -38,7 +38,7 @@ func doFetch(rawURL, ua string, proxyPort int) (*fetchResult, error) {
 	tr := &http.Transport{Proxy: nil, ResponseHeaderTimeout: 15 * time.Second}
 	via := "direct"
 	if proxyPort > 0 {
-		pu, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", proxyPort))
+		pu, _ := url.Parse(fmt.Sprintf("socks5://127.0.0.1:%d", proxyPort))
 		tr.Proxy = http.ProxyURL(pu)
 		via = "proxy"
 	}

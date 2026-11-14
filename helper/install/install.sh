@@ -45,19 +45,26 @@ fi
 
 mkdir -p "$DEST"
 # Сначала удаляем старые файлы: перезапись работающей программы на месте ломает её подпись в macOS.
-rm -f "${DEST:?}/m-link-helper" "${DEST:?}/sing-box" "${DEST:?}/libcronet.so"
+rm -f "${DEST:?}/m-link-helper" "${DEST:?}/sing-box" "${DEST:?}/xray" "${DEST:?}/libcronet.so"
 cp "$SRC/m-link-helper" "$DEST/m-link-helper"
 chmod 755 "$DEST/m-link-helper"
 if [ -f "$SRC/sing-box" ]; then
   cp "$SRC/sing-box" "$DEST/sing-box"
   chmod 755 "$DEST/sing-box"
 fi
+# xray нужен для серверов на транспорте XHTTP, которого нет в sing-box.
+if [ -f "$SRC/xray" ]; then
+  cp "$SRC/xray" "$DEST/xray"
+  chmod 755 "$DEST/xray"
+fi
 # Сборки sing-box для Linux идут с библиотекой libcronet.so, она должна лежать рядом.
 if [ -f "$SRC/libcronet.so" ]; then cp "$SRC/libcronet.so" "$DEST/libcronet.so"; fi
 # Файлы, скачанные браузером, macOS помечает карантином; снимаем метку только с наших файлов.
 if [ "$(uname -s)" = "Darwin" ]; then
   xattr -d com.apple.quarantine "$DEST/m-link-helper" 2>/dev/null || true
-  if [ -f "$DEST/sing-box" ]; then xattr -d com.apple.quarantine "$DEST/sing-box" 2>/dev/null || true; fi
+  for f in sing-box xray; do
+    if [ -f "$DEST/$f" ]; then xattr -d com.apple.quarantine "$DEST/$f" 2>/dev/null || true; fi
+  done
 fi
 
 ORIGINS=""

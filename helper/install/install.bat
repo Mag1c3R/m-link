@@ -13,6 +13,7 @@ taskkill /IM m-link-helper.exe /F >nul 2>&1
 copy /Y "%~dp0m-link-helper.exe" "%DEST%\m-link-helper.exe" >nul || goto :error
 copy /Y "%~dp0%HOST_NAME%.json" "%DEST%\%HOST_NAME%.json" >nul || goto :error
 if exist "%~dp0sing-box.exe" copy /Y "%~dp0sing-box.exe" "%DEST%\sing-box.exe" >nul
+if exist "%~dp0xray.exe" copy /Y "%~dp0xray.exe" "%DEST%\xray.exe" >nul
 if exist "%~dp0libcronet.dll" copy /Y "%~dp0libcronet.dll" "%DEST%\libcronet.dll" >nul
 rem Снимаем с файлов отметку «скачано из интернета», иначе Windows может не дать их запустить.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'MLink') | Unblock-File" >nul 2>&1
