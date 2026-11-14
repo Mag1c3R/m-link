@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>M-Link store art</title>
 <!-- Макеты картинок для Chrome Web Store. Открывать через tests/serve.py:
-     /store/art.html?kind=s1..s5 (1280x800), small (440x280), marquee (1400x560).
+     /store/art.html?kind=s1..s5 (1280x800), small (440x280), marquee (1400x560); &lang=en — английская версия.
      Рендер в файлы: sh store/render.sh -->
 <style>
   :root { --w: 1280px; --h: 800px; }
@@ -69,51 +69,100 @@
 <div class="grid-bg"></div>
 <div id="root"></div>
 <script>
+const params = new URLSearchParams(location.search);
+const LANG = params.get('lang') === 'en' ? 'en' : 'ru';
+document.documentElement.lang = LANG;
 const ICON = '../extension/icons/128.png';
-const PROTOS = ['VLESS', 'Reality', 'Hysteria2', 'VMess', 'Trojan', 'Shadowsocks', 'TUIC'];
+const PROTOS = ['VLESS', 'Reality', 'XHTTP', 'Hysteria2', 'VMess', 'Trojan', 'Shadowsocks', 'TUIC'];
 const chips = (list) => `<div class="chips">${list.map((c) => `<span class="chip">${c}</span>`).join('')}</div>`;
 const brand = `<div class="brand"><img src="${ICON}" alt="">M-Link</div>`;
-const popup = (params) => `<div class="popup-wrap"><iframe src="../tests/preview.html?bare=1&demo=1&${params}"></iframe></div>`;
+const popup = (p) => `<div class="popup-wrap"><iframe src="../tests/preview.html?bare=1&demo=1&ui=${LANG}&${p}"></iframe></div>`;
 const svg = (d) => `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+
+// Тексты слайдов на двух языках. Протоколы — только в чипах и обычных фразах, без длинных перечней.
+const TEXT = {
+  ru: {
+    s1h: 'Твои VPN-подписки — <em>прямо в браузере</em>',
+    s1p: 'Вставь ссылку на подписку, выбери страну и подключайся одним нажатием.',
+    s2h: 'Пинг всех серверов<br><em>за секунды</em>',
+    s2p: 'Результаты появляются сразу, даже для Hysteria2 и XHTTP. Группа «Авто» сама выберет самый быстрый сервер.',
+    s2c: ['42 мс', '37 мс', '58 мс', 'Авто'],
+    s3h: 'Сам решай, какие сайты <em>идут через VPN</em>',
+    s3p: 'Все сайты, все кроме российских или только выбранные. Открытый сайт переключается одной кнопкой.',
+    s3c: ['Все сайты', 'Кроме .ru и .рф', 'Только выбранные'],
+    s4h: 'Подходит <em>любая подписка</em>',
+    s4p: 'Ссылки vless:// и hy2://, base64, JSON для sing-box и xray. Остаток трафика и срок подписки всегда на виду.',
+    s4c: ['base64', 'sing-box JSON', 'xray JSON', 'vless://', 'hy2://'],
+    s5h: 'Открытый код. <em>Ничего не собираем.</em>',
+    s5p: 'Подписки и настройки хранятся только на твоём компьютере. Исходники — на GitHub.',
+    c1t: 'Данные остаются у тебя', c1p: 'Никакой статистики и истории. Расширению не нужен доступ к содержимому сайтов.',
+    c2t: 'Защита от утечек', c2p: 'WebRTC не выдаст настоящий IP, а kill switch не пустит сайты мимо VPN.',
+    c3t: 'Windows, macOS, Linux', c3p: 'Помощник ставится одной командой и дальше обновляется сам.',
+    tag: 'VPN-подписки прямо в браузере',
+    mh: 'Твои VPN-подписки — <em>прямо в браузере</em>',
+    mp: 'Любые подписки, пинг серверов, выбор сайтов и защита от утечек.',
+  },
+  en: {
+    s1h: 'Your VPN subscriptions,<br><em>right in your browser</em>',
+    s1p: 'Paste your subscription link, pick a country and connect with one click.',
+    s2h: 'Ping every server<br><em>in seconds</em>',
+    s2p: 'Results show up right away, even for Hysteria2 and XHTTP. “Auto” picks the fastest server for you.',
+    s2c: ['42 ms', '37 ms', '58 ms', 'Auto'],
+    s3h: 'Choose which sites <em>go through the VPN</em>',
+    s3p: 'All sites, all except your list, or only the ones you pick. Switch the open site with one click.',
+    s3c: ['All sites', 'All except list', 'Selected only'],
+    s4h: 'Works with <em>any subscription</em>',
+    s4p: 'vless:// and hy2:// links, base64, sing-box and xray JSON. Traffic left and expiry date always in sight.',
+    s4c: ['base64', 'sing-box JSON', 'xray JSON', 'vless://', 'hy2://'],
+    s5h: 'Open source.<br><em>No tracking.</em>',
+    s5p: 'Subscriptions and settings stay on your computer. The source code is on GitHub.',
+    c1t: 'Your data stays with you', c1p: 'No statistics, no history. The extension can’t read the content of sites.',
+    c2t: 'Leak protection', c2p: 'WebRTC won’t reveal your real IP, and the kill switch keeps sites off the open internet.',
+    c3t: 'Windows, macOS, Linux', c3p: 'The helper installs with one command and then updates itself.',
+    tag: 'VPN subscriptions in your browser',
+    mh: 'Your VPN subscriptions,<br><em>right in your browser</em>',
+    mp: 'Any subscription, server ping, per-site routing and leak protection.',
+  },
+}[LANG];
 
 const slides = {
   s1: () => `<div class="left">${brand}
-      <h1>Твои VPN-подписки — <em>прямо в браузере</em></h1>
-      <p class="sub">Вставь ссылку на подписку, выбери страну и подключайся одним нажатием.</p>
+      <h1>${TEXT.s1h}</h1>
+      <p class="sub">${TEXT.s1p}</p>
       ${chips(PROTOS)}</div>${popup('state=on')}`,
   s2: () => `<div class="left">${brand}
-      <h1>Пинг всех серверов<br><em>за секунды</em></h1>
-      <p class="sub">Настоящий замер через ядро sing-box, даже для Hysteria2 и TUIC. Группа «Авто» сама выберет самый быстрый сервер.</p>
-      ${chips(['42 мс', '37 мс', '58 мс', 'Авто'])}</div>${popup('state=off')}`,
+      <h1>${TEXT.s2h}</h1>
+      <p class="sub">${TEXT.s2p}</p>
+      ${chips(TEXT.s2c)}</div>${popup('state=off')}`,
   s3: () => `<div class="left">${brand}
-      <h1>Сам решай, какие сайты <em>идут через VPN</em></h1>
-      <p class="sub">Все сайты, все кроме российских или только выбранные. Сайты .ru и .рф по умолчанию открываются напрямую.</p>
-      ${chips(['Все сайты', 'Кроме .ru и .рф', 'Только выбранные'])}</div>${popup('view=settings')}`,
+      <h1>${TEXT.s3h}</h1>
+      <p class="sub">${TEXT.s3p}</p>
+      ${chips(TEXT.s3c)}</div>${popup('view=settings')}`,
   s4: () => `<div class="left">${brand}
-      <h1>Подходит <em>любая подписка</em></h1>
-      <p class="sub">Ссылки vless:// и hy2://, base64, JSON для sing-box и xray. Remnawave, Marzban, 3x-ui. Остаток трафика и срок подписки всегда на виду.</p>
-      ${chips(['base64', 'sing-box JSON', 'xray JSON', 'vless://', 'hy2://'])}</div>${popup('add=https://sub.m-vpn.example/k/Xa7fQ2pL9')}`,
+      <h1>${TEXT.s4h}</h1>
+      <p class="sub">${TEXT.s4p}</p>
+      ${chips(TEXT.s4c)}</div>${popup('add=https://sub.m-vpn.example/k/Xa7fQ2pL9')}`,
   s5: () => `<div class="left" style="width:600px">${brand}
-      <h1>Открытый код. <em>Ничего не собираем.</em></h1>
-      <p class="sub">Подписки и настройки хранятся только на твоём компьютере. Исходники — на GitHub.</p></div>
+      <h1>${TEXT.s5h}</h1>
+      <p class="sub">${TEXT.s5p}</p></div>
       <div class="cards">
         <div class="card"><div class="ic">${svg('<rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>')}</div>
-          <div><b>Данные остаются у тебя</b><span>Расширению не нужен доступ к сайтам. Никакой статистики.</span></div></div>
-        <div class="card"><div class="ic">${svg('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>')}</div>
-          <div><b>Windows, macOS, Linux</b><span>Помощник ставится одной командой, ядро sing-box уже внутри.</span></div></div>
+          <div><b>${TEXT.c1t}</b><span>${TEXT.c1p}</span></div></div>
         <div class="card"><div class="ic">${svg('<path d="M12 2 4 6v6c0 5 3.4 8.7 8 10 4.6-1.3 8-5 8-10V6l-8-4Z"/><path d="m9 12 2 2 4-4"/>')}</div>
-          <div><b>Браузер не останется без сети</b><span>Если соединение оборвалось, прокси сразу отключается.</span></div></div>
+          <div><b>${TEXT.c2t}</b><span>${TEXT.c2p}</span></div></div>
+        <div class="card"><div class="ic">${svg('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>')}</div>
+          <div><b>${TEXT.c3t}</b><span>${TEXT.c3p}</span></div></div>
       </div>`,
   small: () => `<div class="center">${brand}
-      <div class="tag">VPN-подписки прямо в браузере</div>
-      ${chips(['VLESS', 'Reality', 'Hysteria2', 'Trojan'])}</div>`,
+      <div class="tag">${TEXT.tag}</div>
+      ${chips(['VLESS', 'Reality', 'XHTTP', 'Hysteria2'])}</div>`,
   marquee: () => `<div class="left">${brand}
-      <h1>Твои VPN-подписки — <em>прямо в браузере</em></h1>
-      <p class="sub">VLESS, Reality, Hysteria2, Trojan, TUIC. Любые подписки, пинг серверов и выбор сайтов.</p></div>
+      <h1>${TEXT.mh}</h1>
+      <p class="sub">${TEXT.mp}</p></div>
       ${popup('state=on')}`,
 };
 
-const kind = new URLSearchParams(location.search).get('kind') || 's1';
+const kind = params.get('kind') || 's1';
 const sizes = { small: [440, 280], marquee: [1400, 560] };
 const [w, h] = sizes[kind] || [1280, 800];
 document.documentElement.style.setProperty('--w', w + 'px');

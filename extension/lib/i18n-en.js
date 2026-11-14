@@ -173,7 +173,7 @@ export default {
   "Все, кроме списка": "All except list",
   "Только список": "List only",
   "Напрямую (без прокси)": "Direct (no proxy)",
-  "Домены или зоны, по одному на строку: ru, рф, gosuslugi.ru": "Domains or zones, one per line: ru, рф, gosuslugi.ru",
+  "Домены или зоны, по одному на строку: ru, рф, gosuslugi.ru": "Domains or zones, one per line: com, example.org, mybank.com",
   "Только эти сайты через прокси": "Only these sites through the proxy",
   "Поддомены включаются автоматически": "Subdomains are included automatically",
   "Локальный порт": "Local port",

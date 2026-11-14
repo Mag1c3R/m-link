@@ -157,7 +157,11 @@ M-Link connects the browser to the user's own proxy servers. The user adds a sub
 
 ## Картинки
 
-- Значок магазина: `store/icon-128.png`
+- Значок магазина: `store/icon-128.png` (один на оба языка)
 - Скриншоты 1280×800: `store/images/screenshot-1.png` … `screenshot-5.png`
 - Маленькое рекламное изображение: `store/images/promo-small-440x280.png`
 - Очень большое рекламное изображение: `store/images/promo-marquee-1400x560.png`
+
+Английские версии тех же картинок лежат в `store/images/en/` с теми же именами. В кабинете их загружают в английскую карточку: «Описание в магазине» → выбрать язык English.
+
+Все картинки пересобираются командой `sh store/render.sh` (нужен Chrome).
