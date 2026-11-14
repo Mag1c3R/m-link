@@ -17,11 +17,15 @@ const (
 	chunkSize    = 600 << 10 // 600 КБ -> ~800 КБ в base64: Chrome не принимает от помощника сообщения больше 1 МБ
 )
 
-// Заголовки подписки, которые нужны расширению.
-var passHeaders = []string{
-	"content-type", "subscription-userinfo", "profile-title", "profile-update-interval",
-	"support-url", "profile-web-page-url",
+// Заголовки ответа, которые расширению точно не нужны. Остальные передаём все,
+// чтобы новые заголовки панелей (announce и т. п.) не требовали обновления помощника.
+var skipHeaders = map[string]bool{
+	"set-cookie": true, "date": true, "server": true, "connection": true, "keep-alive": true,
+	"transfer-encoding": true, "content-length": true, "alt-svc": true, "strict-transport-security": true,
+	"cf-ray": true, "report-to": true, "nel": true, "vary": true, "etag": true, "last-modified": true,
 }
+
+const maxHeaderBytes = 32 << 10
 
 type fetchResult struct {
 	status  int
@@ -61,10 +65,18 @@ func doFetch(rawURL, ua string, proxyPort int) (*fetchResult, error) {
 		return nil, errors.New("ответ слишком большой")
 	}
 	headers := map[string]string{}
-	for _, h := range passHeaders {
-		if v := resp.Header.Get(h); v != "" {
-			headers[h] = v
+	total := 0
+	for k, vals := range resp.Header {
+		key := strings.ToLower(k)
+		if skipHeaders[key] || len(vals) == 0 {
+			continue
 		}
+		v := strings.Join(vals, ", ")
+		if total+len(key)+len(v) > maxHeaderBytes {
+			continue
+		}
+		total += len(key) + len(v)
+		headers[key] = v
 	}
 	return &fetchResult{status: resp.StatusCode, headers: headers, body: body, via: via}, nil
 }

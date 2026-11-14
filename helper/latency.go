@@ -17,9 +17,12 @@ import (
 
 var udpTypes = map[string]bool{"hysteria2": true, "hysteria": true, "tuic": true}
 
+// onResult вызывается для каждого узла сразу после его замера (может быть nil).
+type resultFunc func(id string, ms int)
+
 // latencyTest меряет реальную задержку через временный sing-box с Clash API.
 // Если ядро недоступно или конфиг не прошёл, откатывается на TCP-пинг до сервера.
-func latencyTest(nodes []testNode, testURL string, timeoutMs int) (map[string]int, string) {
+func latencyTest(nodes []testNode, testURL string, timeoutMs int, onResult resultFunc) (map[string]int, string) {
 	if testURL == "" {
 		testURL = "https://www.gstatic.com/generate_204"
 	}
@@ -27,13 +30,13 @@ func latencyTest(nodes []testNode, testURL string, timeoutMs int) (map[string]in
 		timeoutMs = 5000
 	}
 	if path, err := findCore(); err == nil {
-		res, err := urlTest(path, nodes, testURL, timeoutMs)
+		res, err := urlTest(path, nodes, testURL, timeoutMs, onResult)
 		if err == nil {
 			return res, "urltest"
 		}
 		log.Printf("urltest failed, falling back to tcp: %v", err)
 	}
-	return tcpTest(nodes, timeoutMs), "tcp"
+	return tcpTest(nodes, timeoutMs, onResult), "tcp"
 }
 
 func freePort() (int, error) {
@@ -45,7 +48,7 @@ func freePort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-func urlTest(corePath string, nodes []testNode, testURL string, timeoutMs int) (map[string]int, error) {
+func urlTest(corePath string, nodes []testNode, testURL string, timeoutMs int, onResult resultFunc) (map[string]int, error) {
 	ctrlPort, err := freePort()
 	if err != nil {
 		return nil, err
@@ -138,6 +141,9 @@ func urlTest(corePath string, nodes []testNode, testURL string, timeoutMs int) (
 			mu.Lock()
 			results[id] = ms
 			mu.Unlock()
+			if onResult != nil {
+				onResult(id, ms)
+			}
 		}(i, n.ID)
 	}
 	wg.Wait()
@@ -145,7 +151,7 @@ func urlTest(corePath string, nodes []testNode, testURL string, timeoutMs int) (
 }
 
 // tcpTest — запасной вариант: время TCP-соединения до сервера. Для UDP-протоколов не применим.
-func tcpTest(nodes []testNode, timeoutMs int) map[string]int {
+func tcpTest(nodes []testNode, timeoutMs int, onResult resultFunc) map[string]int {
 	results := make(map[string]int, len(nodes))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -173,6 +179,9 @@ func tcpTest(nodes []testNode, timeoutMs int) map[string]int {
 			mu.Lock()
 			results[n.ID] = ms
 			mu.Unlock()
+			if onResult != nil {
+				onResult(n.ID, ms)
+			}
 		}(n)
 	}
 	wg.Wait()

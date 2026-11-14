@@ -16,7 +16,7 @@ import (
 	"sync"
 )
 
-const version = "1.0.1"
+const version = "1.0.2"
 
 type request struct {
 	ID        int             `json:"id"`
@@ -27,6 +27,7 @@ type request struct {
 	URL       string          `json:"url"`
 	TimeoutMs int             `json:"timeoutMs"`
 	UserAgent string          `json:"userAgent"`
+	Stream    bool            `json:"stream"`
 }
 
 type testNode struct {
@@ -120,7 +121,15 @@ func handle(req request) {
 		reply(req.ID, map[string]any{"running": core.running()})
 
 	case "test":
-		results, method := latencyTest(req.Nodes, req.URL, req.TimeoutMs)
+		// stream: расширение хочет видеть пинг каждого узла сразу, не дожидаясь конца замера.
+		// Старые версии расширения этот флаг не передают и получают только итог.
+		var onResult resultFunc
+		if req.Stream {
+			onResult = func(id string, ms int) {
+				send(map[string]any{"id": req.ID, "result": []any{id, ms}})
+			}
+		}
+		results, method := latencyTest(req.Nodes, req.URL, req.TimeoutMs, onResult)
 		reply(req.ID, map[string]any{"results": results, "method": method})
 
 	case "fetch":
