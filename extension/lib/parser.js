@@ -1,3 +1,5 @@
+import { t as tr } from './i18n.js';
+
 // Разбор ссылок на узлы и подписок в outbound'ы sing-box.
 // Поддержка: vless, vmess, trojan, ss, hysteria2/hy2, hysteria, tuic, anytls, socks,
 // подписки в виде base64, простого списка ссылок и JSON sing-box.
@@ -42,7 +44,7 @@ export function hashString(str) {
 // Свой разбор URI: new URL() для нестандартных схем ведёт себя по-разному в разных версиях Chrome.
 export function splitUri(uri) {
   const m = String(uri).trim().match(/^([a-z0-9+.-]+):\/\/(.*)$/is);
-  if (!m) throw new Error('Не похоже на ссылку');
+  if (!m) throw new Error(tr('Не похоже на ссылку'));
   const scheme = m[1].toLowerCase();
   let rest = m[2];
   let name = '';
@@ -76,7 +78,7 @@ function toPort(p, fallback) {
   const n = parseInt(String(p), 10);
   if (Number.isFinite(n) && n > 0 && n < 65536) return n;
   if (fallback) return fallback;
-  throw new Error('Неверный порт: ' + p);
+  throw new Error(tr('Неверный порт: {0}', p));
 }
 
 function truthy(v) {
@@ -88,6 +90,8 @@ function splitList(v) {
 }
 
 class Unsupported extends Error {}
+// Транспорт, которого нет в sing-box, но который умеет xray (XHTTP и др.): такой узел запускается через xray.
+class NeedsXray extends Unsupported {}
 
 // ---------- TLS и транспорт (формат ссылок xray / v2rayN) ----------
 
@@ -121,7 +125,7 @@ function buildTransport(p, { type, host, path, serviceName }) {
     case 'raw':
     case '':
       if ((p.get('headerType') || '').toLowerCase() === 'http') {
-        throw new Unsupported('TCP с HTTP-обфускацией не поддерживается sing-box');
+        throw new NeedsXray(tr('TCP с HTTP-обфускацией не поддерживается sing-box'));
       }
       return undefined;
     case 'ws': {
@@ -154,9 +158,12 @@ function buildTransport(p, { type, host, path, serviceName }) {
     }
     case 'xhttp':
     case 'splithttp':
-      throw new Unsupported('Транспорт XHTTP есть только в xray, sing-box его не умеет');
+      throw new NeedsXray(tr('Транспорт XHTTP есть только в xray, sing-box его не умеет'));
+    case 'kcp':
+    case 'mkcp':
+      throw new NeedsXray(tr('Транспорт mKCP есть только в xray'));
     default:
-      throw new Unsupported('Транспорт ' + t + ' не поддерживается');
+      throw new Unsupported(tr('Транспорт {0} не поддерживается', t));
   }
 }
 
@@ -266,7 +273,7 @@ function parseShadowsocks(uri) {
   } else {
     const d = decodeBase64(info);
     const i = d.indexOf(':');
-    if (i < 0) throw new Error('Не удалось разобрать ss userinfo');
+    if (i < 0) throw new Error(tr('Не удалось разобрать ss userinfo'));
     method = d.slice(0, i);
     password = d.slice(i + 1);
   }
@@ -283,7 +290,7 @@ function parseShadowsocks(uri) {
     let name = parts.shift();
     if (name === 'simple-obfs') name = 'obfs-local';
     if (name !== 'obfs-local' && name !== 'v2ray-plugin') {
-      throw new Unsupported('Плагин ' + name + ' не поддерживается');
+      throw new Unsupported(tr('Плагин {0} не поддерживается', name));
     }
     ob.plugin = name;
     ob.plugin_opts = parts.join(';');
@@ -421,10 +428,83 @@ export function isPlaceholder(host, port) {
 function makeInfo(raw, text) {
   return {
     id: hashString('info:' + raw),
-    name: String(text || '').trim() || 'Сообщение от сервиса',
+    name: String(text || '').trim() || tr('Сообщение от сервиса'),
     type: 'info',
     label: '',
     info: true,
+  };
+}
+
+// Узел, который запускается через xray: хранит outbound в формате xray, а не sing-box.
+function makeXrayNode(raw, xob, name, host, port) {
+  if (isPlaceholder(host, port)) return makeInfo(raw, name);
+  const net = (xob.streamSettings?.network || 'tcp').toUpperCase();
+  const proto = PROTO_LABEL[xob.protocol] || xob.protocol;
+  return {
+    id: hashString(raw),
+    name: (name || '').trim() || `${host}:${port}`,
+    type: xob.protocol,
+    label: `${proto} ${net === 'SPLITHTTP' ? 'XHTTP' : net}`,
+    server: host,
+    port,
+    core: 'xray',
+    xray: xob,
+  };
+}
+
+// Копия outbound xray без полей, которые ссылаются на другие outbound'ы исходного конфига.
+function cleanXrayOutbound(o) {
+  const ob = JSON.parse(JSON.stringify(o));
+  delete ob.tag;
+  delete ob.proxySettings;
+  if (ob.streamSettings?.sockopt) delete ob.streamSettings.sockopt.dialerProxy;
+  return ob;
+}
+
+// vless://...?type=xhttp -> outbound xray.
+function vlessLinkToXray(u) {
+  const p = u.params;
+  const sec = (p.get('security') || 'none').toLowerCase();
+  const user = { id: dec(u.userinfo), encryption: p.get('encryption') || 'none' };
+  if (p.get('flow')) user.flow = p.get('flow');
+  const ss = { network: (p.get('type') || 'xhttp').toLowerCase() === 'splithttp' ? 'xhttp' : (p.get('type') || 'xhttp').toLowerCase() };
+  const sni = p.get('sni') || p.get('peer') || p.get('serverName') || '';
+  const fp = p.get('fp');
+  const alpn = splitList(p.get('alpn'));
+  if (sec === 'tls') {
+    ss.security = 'tls';
+    ss.tlsSettings = { serverName: sni || u.host };
+    if (fp && fp !== 'none') ss.tlsSettings.fingerprint = fp;
+    if (alpn.length) ss.tlsSettings.alpn = alpn;
+    if (truthy(p.get('allowInsecure')) || truthy(p.get('insecure'))) ss.tlsSettings.allowInsecure = true;
+  } else if (sec === 'reality') {
+    ss.security = 'reality';
+    ss.realitySettings = { serverName: sni, fingerprint: fp || 'chrome', publicKey: p.get('pbk') || '', shortId: p.get('sid') || '' };
+    if (p.get('spx')) ss.realitySettings.spiderX = p.get('spx');
+  } else {
+    ss.security = 'none';
+  }
+  if (ss.network === 'xhttp') {
+    const x = { path: p.get('path') || '/' };
+    if (p.get('host')) x.host = p.get('host');
+    if (p.get('mode')) x.mode = p.get('mode');
+    if (p.get('extra')) {
+      try { x.extra = JSON.parse(p.get('extra')); } catch { /* кривой extra пропускаем */ }
+    }
+    ss.xhttpSettings = x;
+  } else if (ss.network === 'tcp' || ss.network === 'raw') {
+    ss.network = 'raw';
+    if ((p.get('headerType') || '') === 'http') {
+      ss.rawSettings = { header: { type: 'http', request: { path: [p.get('path') || '/'], headers: p.get('host') ? { Host: [p.get('host')] } : {} } } };
+    }
+  } else if (ss.network === 'kcp' || ss.network === 'mkcp') {
+    ss.network = 'kcp';
+    ss.kcpSettings = { header: { type: p.get('headerType') || 'none' }, ...(p.get('seed') ? { seed: p.get('seed') } : {}) };
+  }
+  return {
+    protocol: 'vless',
+    settings: { vnext: [{ address: u.host, port: toPort(u.port, 443), users: [user] }] },
+    streamSettings: ss,
   };
 }
 
@@ -444,7 +524,7 @@ function makeNode(raw, ob, name, host, port) {
 function makeUnsupported(raw, scheme, name, reason) {
   return {
     id: hashString(raw),
-    name: (name || '').trim() || scheme + ' узел',
+    name: (name || '').trim() || tr('{0} узел', scheme),
     type: scheme,
     label: scheme.toUpperCase(),
     unsupported: reason,
@@ -455,7 +535,7 @@ function makeUnsupported(raw, scheme, name, reason) {
 export function parseLink(raw) {
   const link = raw.trim();
   const scheme = (link.match(/^([a-z0-9+.-]+):\/\//i) || [])[1]?.toLowerCase();
-  if (!scheme) throw new Error('Не похоже на ссылку');
+  if (!scheme) throw new Error(tr('Не похоже на ссылку'));
   let name = '';
   try {
     if (scheme === 'vmess') {
@@ -470,7 +550,14 @@ export function parseLink(raw) {
     name = u.name;
     let ob;
     switch (scheme) {
-      case 'vless': ob = parseVless(u); break;
+      case 'vless':
+        try {
+          ob = parseVless(u);
+        } catch (e) {
+          if (e instanceof NeedsXray) return makeXrayNode(link, vlessLinkToXray(u), u.name, u.host, toPort(u.port, 443));
+          throw e;
+        }
+        break;
       case 'trojan': ob = parseTrojan(u); break;
       case 'hysteria2':
       case 'hy2': ob = parseHysteria2(u); break;
@@ -480,7 +567,7 @@ export function parseLink(raw) {
       case 'socks':
       case 'socks5': ob = parseSocks(u); break;
       default:
-        return makeUnsupported(link, scheme, name, 'Протокол ' + scheme + ' пока не поддерживается');
+        return makeUnsupported(link, scheme, name, tr('Протокол {0} пока не поддерживается', scheme));
     }
     return makeNode(link, ob, u.name, ob.server, ob.server_port);
   } catch (e) {
@@ -551,13 +638,13 @@ function xrayStreamParams(ss = {}) {
 function xrayOutboundToSingbox(o) {
   const proto = o.protocol;
   const srv = xrayServer(o.settings);
-  if (!srv.address || !srv.port) throw new Error('нет адреса сервера');
+  if (!srv.address || !srv.port) throw new Error(tr('нет адреса сервера'));
   const st = xrayStreamParams(o.streamSettings);
 
   if (proto === 'hysteria' || proto === 'hysteria2') {
     const hs = o.streamSettings?.hysteriaSettings || {};
     const ver = o.settings?.version || hs.version || (proto === 'hysteria2' ? 2 : 1);
-    if (ver !== 2) throw new Unsupported('Hysteria v1 в формате xray не поддерживается');
+    if (ver !== 2) throw new Unsupported(tr('Hysteria v1 в формате xray не поддерживается'));
     const ob = {
       type: 'hysteria2', server: srv.address, server_port: toPort(srv.port, 443),
       password: hs.auth || o.settings?.password || '',
@@ -592,7 +679,7 @@ function xrayOutboundToSingbox(o) {
     const u = srv.raw.users?.[0];
     if (u?.user) { ob.username = u.user; ob.password = u.pass || ''; }
   } else {
-    throw new Unsupported('Протокол ' + proto + ' не поддерживается');
+    throw new Unsupported(tr('Протокол {0} не поддерживается', proto));
   }
 
   if (proto !== 'shadowsocks') {
@@ -628,8 +715,9 @@ function fromXrayJson(list) {
       } catch (e) {
         const srv = xrayServer(proxies[0].settings);
         if (isPlaceholder(srv.address, srv.port)) nodes.push(makeInfo(raw, name));
+        else if (e instanceof NeedsXray) nodes.push(makeXrayNode(raw, cleanXrayOutbound(proxies[0]), name, srv.address, srv.port));
         else if (e instanceof Unsupported) nodes.push(makeUnsupported(raw, proxies[0].protocol, name, e.message));
-        else nodes.push(makeUnsupported(raw, proxies[0].protocol, name, 'Не удалось разобрать: ' + e.message));
+        else nodes.push(makeUnsupported(raw, proxies[0].protocol, name, tr('Не удалось разобрать: {0}', e.message)));
       }
       continue;
     }
@@ -650,7 +738,7 @@ function fromXrayJson(list) {
     }
     if (!members.length) {
       if (placeholders) nodes.push(makeInfo(raw, name));
-      else nodes.push(makeUnsupported(raw, 'group', name, 'В группе нет узлов, которые умеет sing-box'));
+      else nodes.push(makeUnsupported(raw, 'group', name, tr('В группе нет узлов, которые умеет sing-box')));
       continue;
     }
     const obs = cfg.burstObservatory?.pingConfig || cfg.observatory || {};
@@ -695,7 +783,7 @@ export function parseSubscription(text) {
     try { content = decodeBase64(body); } catch { /* оставим как есть */ }
   }
   if (/^\s*(proxies|proxy-groups|mixed-port|port):/m.test(content)) {
-    return { nodes: [], errors: ['Формат Clash YAML пока не поддерживается. Попробуй ссылку подписки для v2rayN / sing-box.'] };
+    return { nodes: [], errors: [tr('Формат Clash YAML пока не поддерживается. Попробуй ссылку подписки для v2rayN / sing-box.')] };
   }
 
   const nodes = [];

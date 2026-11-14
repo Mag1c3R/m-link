@@ -25,6 +25,14 @@ export const BRAND = {
     // ?start=mclient: бот получит /start mclient и сможет посчитать, сколько людей пришло из расширения.
     url: 'https://t.me/mag1c3r_vpn_bot?start=mclient',
   },
+  // Тот же блок для английского интерфейса; remote-config.json может заменить его полем promoEn.
+  promoEn: {
+    enabled: true,
+    title: 'No subscription yet?',
+    text: 'M-VPN: get a subscription from our Telegram bot and paste the link here with the "+" button.',
+    button: 'Open the M-VPN bot',
+    url: 'https://t.me/mag1c3r_vpn_bot?start=mclient',
+  },
 };
 
 // Сравнение версий вида 1.2.3: отрицательное число, если a < b.

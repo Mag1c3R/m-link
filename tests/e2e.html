@@ -19,6 +19,8 @@ const stub = await installChromeStub({
   helperAvailable: !q.get('nohelper'),
   platform: { os: q.get('os') || 'mac', arch: q.get('arch') || 'arm64' },
   local: q.get('port') ? { settings: { port: Number(q.get('port')) } } : {},
+  uiLang: q.get('ui') || 'ru',
+  tabUrl: q.get('tab') || 'https://www.youtube.com/watch?v=1',
 });
 await import('../extension/background.js');
 stub.fireInstalled();

@@ -26,12 +26,15 @@
         <div class="hero-text">
           <div class="status" id="status-text">Отключено</div>
           <div class="node-line" id="node-line">Узел не выбран</div>
+          <div class="speed" id="speed" hidden></div>
           <button class="mode-chip" id="mode-chip"></button>
         </div>
       </div>
 
       <div class="banner" id="banner" hidden></div>
       <div class="setup" id="setup" hidden></div>
+      <div class="site" id="site" hidden></div>
+      <div class="reminder" id="reminder" hidden></div>
 
       <div class="toolbar">
         <div class="search-wrap">
@@ -104,6 +107,18 @@
           </label>
         </div>
 
+        <div class="field" id="rules-field" hidden>
+          <span class="label">Правила для сайтов</span>
+          <div class="rules" id="rules-list"></div>
+          <span class="hint">Их задаёт переключатель на главном экране. Правило важнее режима.</span>
+        </div>
+
+        <div class="field">
+          <span class="label">Защита</span>
+          <label class="check"><input type="checkbox" id="webrtc-protect"> <span>Защита от утечки IP через WebRTC</span></label>
+          <label class="check"><input type="checkbox" id="kill-switch"> <span>Kill switch: при обрыве VPN не открывать сайты напрямую</span></label>
+        </div>
+
         <div class="field">
           <span class="label">Список узлов</span>
           <label class="check"><input type="checkbox" id="sort-by-ping"> <span>Сортировать по пингу после замера</span></label>
@@ -114,6 +129,15 @@
           <span class="label">User-Agent для подписок</span>
           <input id="user-agent" type="text" spellcheck="false">
           <span class="hint">Некоторые панели отдают разный формат в зависимости от него</span>
+        </label>
+
+        <label class="field">
+          <span class="label">Язык</span>
+          <select id="lang">
+            <option value="auto">Как в браузере</option>
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
         </label>
 
         <div class="field">

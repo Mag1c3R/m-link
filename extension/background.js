@@ -1,6 +1,7 @@
 import { parseSubscription, parseUserInfo, parseProfileTitle, hashString } from './lib/parser.js';
-import { buildRunConfig, buildPac, normalizeDomains, DEFAULT_EXCEPT } from './lib/singbox.js';
+import { buildNodeConfig, buildPac, normalizeDomains, normalizeRules, DEFAULT_EXCEPT } from './lib/singbox.js';
 import { BRAND, compareVersions, sanitizePromo } from './config.js';
+import { t, tHelper, setLang, detectLang } from './lib/i18n.js';
 
 const TEST_URL = 'https://www.gstatic.com/generate_204';
 const DEFAULT_UA = `${BRAND.name}/${chrome.runtime.getManifest().version}`;
@@ -10,10 +11,14 @@ const DEFAULT_SETTINGS = {
   mode: 'except', // all | except | only
   exceptList: DEFAULT_EXCEPT.join('\n'),
   onlyList: '',
+  siteRules: {}, // { "youtube.com": "proxy" | "direct" } — важнее режима
   userAgent: DEFAULT_UA,
   updateHours: 12,
   sortByPing: true,
   showUnsupported: false,
+  webrtcProtect: true, // не давать WebRTC показывать настоящий IP в обход прокси
+  killSwitch: false, // при обрыве не пускать сайты мимо VPN
+  lang: 'auto', // auto | ru | en
 };
 
 const DEFAULTS = {
@@ -30,6 +35,7 @@ async function loadState() {
   s.settings = { ...DEFAULT_SETTINGS, ...s.settings };
   // User-Agent по умолчанию от прошлых версий заменяем текущим, свой собственный не трогаем.
   if (/^M-(Client|Link)\/[\d.]+$/.test(s.settings.userAgent || '')) s.settings.userAgent = DEFAULT_UA;
+  setLang(detectLang(s.settings.lang));
   return s;
 }
 
@@ -60,7 +66,7 @@ async function setStatus(state, extra = {}) {
   await chrome.action.setBadgeBackgroundColor({ color: badge[1] });
   await chrome.action.setBadgeText({ text: badge[0] });
   await chrome.action.setTitle({
-    title: state === 'on' ? `${BRAND.name}: подключено (${extra.nodeName || ''})` : BRAND.name,
+    title: state === 'on' ? t('{0}: подключено ({1})', BRAND.name, extra.nodeName || '') : BRAND.name,
   });
   await setIcon(state === 'on');
 }
@@ -84,26 +90,28 @@ const pending = new Map();
 let helperUsers = 0; // сколько операций сейчас пользуются помощником
 let connectBusy = 0; // идёт подключение
 let coreActive = false; // ядро запущено нашим подключением
+let caps = null; // что умеет установленный помощник: { version, features: Set }
+let capsStale = true; // помощник мог смениться (новое соединение, обновление)
 
 // Ошибки уровня «помощник недоступен». Возвращает null, если это обычная ошибка операции.
 function hostError(msg) {
   if (/Access to the specified native messaging host is forbidden/i.test(msg)) {
-    return { code: 'no_helper', error: 'Помощник установлен для другого расширения. Установи его заново.' };
+    return { code: 'no_helper', error: t('Помощник установлен для другого расширения. Установи его заново.') };
   }
   if (/not found|not installed|Specified native messaging host/i.test(msg)) {
-    return { code: 'no_helper', error: 'Помощник не установлен. Он нужен, чтобы работали VLESS, Hysteria2 и другие протоколы.' };
+    return { code: 'no_helper', error: t('Помощник не установлен. Он нужен, чтобы работали VLESS, Hysteria2 и другие протоколы.') };
   }
   if (/неизвестная команда/i.test(msg)) {
-    return { code: 'old_helper', error: 'Помощник устарел. Обнови его, и всё заработает.' };
+    return { code: 'old_helper', error: t('Помощник устарел. Обнови его, и всё заработает.') };
   }
   if (/Native host has exited|Error when communicating with the native messaging host/i.test(msg)) {
-    return { code: 'helper_crash', error: 'Помощник неожиданно завершился. Попробуй ещё раз.' };
+    return { code: 'helper_crash', error: t('Помощник неожиданно завершился. Попробуй ещё раз.') };
   }
   return null;
 }
 
 function helperError(e, fallbackCode = 'helper') {
-  const info = hostError(e.message) || { code: e.code || fallbackCode, error: e.message };
+  const info = hostError(e.message) || { code: e.code || fallbackCode, error: tHelper(e.message) };
   return Object.assign(new Error(info.error), { code: info.code });
 }
 
@@ -117,9 +125,10 @@ function ensurePort() {
   if (port) return port;
   const created = chrome.runtime.connectNative(BRAND.helperName);
   port = created;
+  capsStale = true;
   created.onMessage.addListener(onHostMessage);
   created.onDisconnect.addListener(() => {
-    const msg = chrome.runtime.lastError?.message || 'Помощник отключился';
+    const msg = chrome.runtime.lastError?.message || t('Помощник отключился');
     if (port === created) port = null;
     failPending(msg);
     onHelperGone(msg);
@@ -131,7 +140,7 @@ function closePort() {
   if (!port) return;
   try { port.disconnect(); } catch { /* уже закрыт */ }
   port = null;
-  failPending('Соединение с помощником закрыто');
+  failPending(t('Соединение с помощником закрыто'));
 }
 
 // Закрывает помощник, когда он никому не нужен: без подключения он не должен висеть в памяти.
@@ -157,7 +166,7 @@ function callHelper(cmd, args = {}, timeoutMs = 15000, { onResult } = {}) {
       clearTimeout(timer);
       timer = setTimeout(() => {
         pending.delete(id);
-        reject(new Error('Помощник не ответил вовремя'));
+        reject(new Error(t('Помощник не ответил вовремя')));
       }, timeoutMs);
     };
     arm();
@@ -195,33 +204,32 @@ function onHostMessage(msg) {
     }
     pending.delete(msg.id);
     if (msg.ok) p.resolve({ ...msg, chunks: p.parts });
-    else p.reject(new Error(msg.error || 'Ошибка помощника'));
+    else p.reject(new Error(msg.error || t('Ошибка помощника')));
     return;
   }
   if (msg?.event === 'exited') {
-    onCoreExited(msg.error || 'sing-box завершился');
+    onCoreExited(msg.error || t('ядро завершилось'));
   }
 }
 
-async function onCoreExited(error) {
-  coreActive = false;
-  const status = await getStatus();
-  if (status.state === 'on' || status.state === 'connecting') {
-    await clearProxy();
-    await chrome.storage.local.set({ wantConnected: false });
-    await setStatus('error', { code: 'core', error: 'Соединение оборвалось: ' + error });
-  }
-  releaseHelperIfIdle();
+// Что умеет помощник. У версий до 1.1 нет списка возможностей: считаем, что только базовые.
+async function ensureCaps() {
+  if (caps && !capsStale) return caps;
+  const res = await callHelper('hello', {}, 5000);
+  caps = {
+    version: res.version,
+    features: new Set(Array.isArray(res.features) ? res.features : []),
+    core: res.coreVersion,
+    corePath: res.corePath,
+    coreError: res.coreError,
+    xrayVersion: res.xrayVersion,
+  };
+  capsStale = false;
+  return caps;
 }
 
-async function onHelperGone(msg) {
-  coreActive = false;
-  const status = await getStatus();
-  if (status.state !== 'on' && status.state !== 'connecting') return;
-  if (connectBusy) return; // ошибку покажет само подключение
-  await clearProxy();
-  await chrome.storage.local.set({ wantConnected: false });
-  await setStatus('error', hostError(msg) || { code: 'helper', error: msg });
+function needsUpdateError(what) {
+  return Object.assign(new Error(t('{0} нужен помощник новее. Обнови его, это займёт минуту.', what)), { code: 'helper_feature' });
 }
 
 // ---------- прокси в браузере ----------
@@ -235,17 +243,42 @@ function proxyDomains(settings) {
 async function applyProxy(settings) {
   const current = await chrome.proxy.settings.get({});
   if (current.levelOfControl === 'controlled_by_other_extensions') {
-    throw new Error('Прокси сейчас контролирует другое расширение. Отключи его и попробуй снова.');
+    throw new Error(t('Прокси сейчас контролирует другое расширение. Отключи его и попробуй снова.'));
   }
   if (current.levelOfControl === 'not_controllable') {
-    throw new Error('Настройки прокси заблокированы политикой браузера.');
+    throw new Error(t('Настройки прокси заблокированы политикой браузера.'));
   }
-  const data = buildPac({ port: settings.port, mode: settings.mode, domains: proxyDomains(settings) });
+  const data = buildPac({
+    port: settings.port, mode: settings.mode, domains: proxyDomains(settings), rules: normalizeRules(settings.siteRules),
+  });
   await chrome.proxy.settings.set({ value: { mode: 'pac_script', pacScript: { data } }, scope: 'regular' });
 }
 
 async function clearProxy() {
   try { await chrome.proxy.settings.clear({ scope: 'regular' }); } catch { /* ничего */ }
+}
+
+// Наш прокси сейчас включён в браузере (нужно kill switch'у, чтобы не снимать его при обрыве).
+async function ourProxyActive() {
+  try {
+    const cur = await chrome.proxy.settings.get({});
+    return cur.levelOfControl === 'controlled_by_this_extension' && cur.value?.mode === 'pac_script';
+  } catch {
+    return false;
+  }
+}
+
+// WebRTC может узнать настоящий IP в обход прокси. Политика disable_non_proxied_udp
+// пускает WebRTC только через прокси.
+async function applyWebRTC(settings) {
+  if (!settings.webrtcProtect) return clearWebRTC();
+  try {
+    await chrome.privacy.network.webRTCIPHandlingPolicy.set({ value: 'disable_non_proxied_udp' });
+  } catch { /* политика браузера может запрещать — подключение это не ломает */ }
+}
+
+async function clearWebRTC() {
+  try { await chrome.privacy.network.webRTCIPHandlingPolicy.clear({}); } catch { /* ничего */ }
 }
 
 // ---------- подключение ----------
@@ -264,8 +297,8 @@ async function doConnect() {
     node = allNodes(state).find(usable);
     if (!node) {
       const info = allNodes(state).find((n) => n.info);
-      if (info) throw new Error(`Нет серверов для подключения. Сообщение от сервиса: ${info.name}`);
-      throw new Error(state.subs.length || state.manual.length ? 'В подписке нет серверов, к которым можно подключиться' : 'Сначала добавь подписку или узел');
+      if (info) throw new Error(t('Нет серверов для подключения. Сообщение от сервиса: {0}', info.name));
+      throw new Error(state.subs.length || state.manual.length ? t('В подписке нет серверов, к которым можно подключиться') : t('Сначала добавь подписку или узел'));
     }
     await chrome.storage.local.set({ selectedId: node.id });
   }
@@ -273,24 +306,38 @@ async function doConnect() {
   try {
     await setStatus('connecting', { nodeId: node.id, nodeName: node.name });
     await chrome.storage.local.set({ wantConnected: true });
-    const config = buildRunConfig(node.outbound, { port: state.settings.port, members: node.members });
-    const res = await callHelper('start', { config, port: state.settings.port }, 25000);
+    if (node.core === 'xray') {
+      const c = await ensureCaps();
+      if (!c.features.has('xray')) throw needsUpdateError(t('Для серверов {0}', node.label));
+    }
+    const { core, config } = buildNodeConfig(node, { port: state.settings.port });
+    const res = await callHelper('start', { config, port: state.settings.port, core }, 25000);
     coreActive = true;
     await applyProxy(state.settings);
+    await applyWebRTC(state.settings);
+    stopReconnect();
     await setStatus('on', {
-      nodeId: node.id, nodeName: node.name, since: Date.now(), core: res.coreVersion || '',
+      nodeId: node.id, nodeName: node.name, since: Date.now(), core: res.core || 'sing-box', coreVersion: res.coreVersion || '',
     });
     return { ok: true };
   } catch (e) {
     const err = helperError(e, 'start');
-    await clearProxy();
-    await chrome.storage.local.set({ wantConnected: false });
     if (coreActive) {
       // Ядро запустилось, но прокси применить не удалось: останавливаем его.
       try { await callHelper('stop', {}, 5000); } catch { /* помощник уже недоступен */ }
       coreActive = false;
     }
-    await setStatus('error', { code: err.code, error: err.message, nodeId: node.id, nodeName: node.name });
+    if (state.settings.killSwitch && (await ourProxyActive())) {
+      // Kill switch: прокси был включён (переподключение или смена узла) — оставляем его,
+      // чтобы сайты не открылись мимо VPN, и пробуем переподключиться.
+      await setKillSwitchStatus(err.message, node);
+      scheduleReconnect();
+    } else {
+      await clearProxy();
+      await clearWebRTC();
+      await chrome.storage.local.set({ wantConnected: false });
+      await setStatus('error', { code: err.code, error: err.message, nodeId: node.id, nodeName: node.name });
+    }
     throw err;
   } finally {
     connectBusy--;
@@ -299,8 +346,10 @@ async function doConnect() {
 }
 
 async function disconnect() {
+  stopReconnect();
   await chrome.storage.local.set({ wantConnected: false });
   await clearProxy();
+  await clearWebRTC();
   if (port) {
     try { await callHelper('stop', {}, 5000); } catch { /* всё равно закрываем */ }
   }
@@ -309,14 +358,74 @@ async function disconnect() {
   await setStatus('off');
 }
 
+// Соединение оборвалось само (ядро упало, помощник закрылся).
+async function connectionLost(info) {
+  coreActive = false;
+  const status = await getStatus();
+  if (status.state !== 'on' && status.state !== 'connecting') return;
+  const state = await loadState();
+  if (state.settings.killSwitch) {
+    await setKillSwitchStatus(info.error, { id: status.nodeId, name: status.nodeName });
+    scheduleReconnect();
+  } else {
+    await clearProxy();
+    await clearWebRTC();
+    await chrome.storage.local.set({ wantConnected: false });
+    await setStatus('error', info);
+  }
+  releaseHelperIfIdle();
+}
+
+async function setKillSwitchStatus(detail, node) {
+  await setStatus('error', {
+    code: 'killswitch',
+    error: t('Соединение оборвалось. Сайты через VPN не откроются, пока оно не восстановится: включена защита от утечки.'),
+    detail,
+    nodeId: node?.id,
+    nodeName: node?.name,
+  });
+}
+
+async function onCoreExited(error) {
+  await connectionLost({ code: 'core', error: t('Соединение оборвалось: {0}', tHelper(error)) });
+}
+
+async function onHelperGone(msg) {
+  if (connectBusy) return; // ошибку покажет само подключение
+  await connectionLost(hostError(msg) || { code: 'helper', error: msg });
+}
+
+// Переподключение при включённом kill switch: сначала быстро, потом раз в минуту.
+let reconnectTimer = null;
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => tryReconnect(), 3000);
+  chrome.alarms.create('reconnect', { periodInMinutes: 1 });
+}
+
+function stopReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  chrome.alarms.clear('reconnect');
+}
+
+async function tryReconnect() {
+  const state = await loadState();
+  const status = await getStatus();
+  if (!state.wantConnected || status.state === 'on') { stopReconnect(); return; }
+  if (status.state === 'connecting') return;
+  connect().catch(() => {});
+}
+
 // ---------- подписки ----------
 
 function decodeChunks(chunks, count) {
-  if (chunks.length !== count) throw new Error('Подписка пришла не полностью, попробуй ещё раз');
+  if (chunks.length !== count) throw new Error(t('Подписка пришла не полностью, попробуй ещё раз'));
   const arrays = [];
   let total = 0;
   for (let i = 0; i < count; i++) {
-    if (typeof chunks[i] !== 'string') throw new Error('Подписка пришла не полностью, попробуй ещё раз');
+    if (typeof chunks[i] !== 'string') throw new Error(t('Подписка пришла не полностью, попробуй ещё раз'));
     const bin = atob(chunks[i]);
     const arr = new Uint8Array(bin.length);
     for (let j = 0; j < bin.length; j++) arr[j] = bin.charCodeAt(j);
@@ -331,10 +440,10 @@ function decodeChunks(chunks, count) {
 }
 
 function statusMessage(status) {
-  if (status === 404) return 'Подписка не найдена (404). Проверь ссылку.';
-  if (status === 401 || status === 403) return `Сервер подписки отказал в доступе (${status}). Возможно, подписка отключена.`;
-  if (status >= 500) return `Сервер подписки временно не работает (${status}). Попробуй позже.`;
-  return `Сервер подписки ответил ${status}`;
+  if (status === 404) return t('Подписка не найдена (404). Проверь ссылку.');
+  if (status === 401 || status === 403) return t('Сервер подписки отказал в доступе ({0}). Возможно, подписка отключена.', status);
+  if (status >= 500) return t('Сервер подписки временно не работает ({0}). Попробуй позже.', status);
+  return t('Сервер подписки ответил {0}', status);
 }
 
 async function fetchSubscription(url, settings) {
@@ -350,7 +459,7 @@ async function fetchSubscription(url, settings) {
   // Пустой ответ с кодом 200 — это ответ панели (например, подписка заморожена), а не сбой:
   // старый список серверов в таком случае показывать нельзя.
   if (!nodes.length && text.trim()) {
-    throw new Error(errors[0] || 'В подписке не нашлось ни одного узла');
+    throw new Error(errors[0] || t('В подписке не нашлось ни одного узла'));
   }
   const h = res.headers || {};
   return {
@@ -389,7 +498,7 @@ async function addOrUpdateSubscription(url) {
   const fresh = await loadState();
   const prev = fresh.subs.find((s) => s.id === id);
   let name = data.title || prev?.name;
-  if (!name) { try { name = new URL(url).hostname; } catch { name = 'Подписка'; } }
+  if (!name) { try { name = new URL(url).hostname; } catch { name = t('Подписка'); } }
   const sub = {
     id, url, name,
     nodes: data.nodes,
@@ -440,7 +549,7 @@ async function addInput(text) {
     return { added, unsupported, messages };
   }
   const { nodes, errors } = parseSubscription(text);
-  if (!nodes.length) throw new Error(errors[0] || 'Не нашлось ни одной ссылки на узел или подписку');
+  if (!nodes.length) throw new Error(errors[0] || t('Не нашлось ни одной ссылки на узел или подписку'));
   const state = await loadState();
   const known = new Set(state.manual.map((n) => n.id));
   const manual = [...state.manual, ...nodes.filter((n) => !known.has(n.id))];
@@ -511,6 +620,8 @@ async function removeManual(id) {
 
 // ---------- замер задержки ----------
 
+let testingNow = false;
+
 async function testLatency(group) {
   const state = await loadState();
   let nodes;
@@ -521,6 +632,24 @@ async function testLatency(group) {
   nodes = nodes.filter((n) => usable(n) && !n.members);
   if (!nodes.length) return { results: {} };
 
+  testingNow = true;
+  try {
+    return await withHelper(async () => {
+      // Узлы xray меряем, только если помощник умеет xray: иначе он принял бы их за sing-box,
+      // и замер всех узлов откатился бы на простой TCP-пинг.
+      let c;
+      try { c = await ensureCaps(); } catch (e) { throw helperError(e, 'test'); }
+      const skipped = c.features.has('xray') ? 0 : nodes.filter((n) => n.core === 'xray').length;
+      if (skipped) nodes = nodes.filter((n) => n.core !== 'xray');
+      if (!nodes.length) return { tested: 0, alive: 0, skipped };
+      return await runTest(group, nodes, skipped);
+    });
+  } finally {
+    testingNow = false;
+  }
+}
+
+async function runTest(group, nodes, skipped) {
   // Старые значения убираем, чтобы было видно, какие узлы уже перемерены.
   const ids = new Set(nodes.map((n) => n.id));
   const start = await loadState();
@@ -557,12 +686,14 @@ async function testLatency(group) {
   try {
     let res;
     try {
-      res = await withHelper(() => callHelper('test', {
+      res = await callHelper('test', {
         url: TEST_URL,
         timeoutMs: 5000,
         stream: true,
-        nodes: nodes.map((n) => ({ id: n.id, outbound: n.outbound, server: n.server, port: n.port })),
-      }, 180000, { onResult }));
+        nodes: nodes.map((n) => ({
+          id: n.id, outbound: n.outbound, core: n.core || 'sing-box', xray: n.xray, server: n.server, port: n.port,
+        })),
+      }, 180000, { onResult });
     } catch (e) {
       throw helperError(e, 'test');
     }
@@ -572,11 +703,26 @@ async function testLatency(group) {
     const fresh = await loadState();
     await chrome.storage.local.set({ latency: { ...fresh.latency, ...res.results } });
     const alive = Object.values(res.results).filter((ms) => ms > 0).length;
-    return { tested: nodes.length, alive, method: res.method };
+    return { tested: nodes.length, alive, method: res.method, skipped };
   } finally {
     clearTimeout(flushTimer);
     await flushing.catch(() => {});
     await chrome.storage.session.set({ testing: null });
+  }
+}
+
+// ---------- скорость соединения ----------
+
+async function connectionStats() {
+  const status = await getStatus();
+  if (status.state !== 'on' || !port) return { available: false };
+  try {
+    const c = await ensureCaps();
+    if (!c.features.has('stats')) return { available: false };
+    const r = await callHelper('stats', {}, 3000);
+    return { available: !!r.available, down: r.down || 0, up: r.up || 0, at: Date.now() };
+  } catch {
+    return { available: false };
   }
 }
 
@@ -590,15 +736,34 @@ async function saveSettings(patch) {
   settings.userAgent = String(settings.userAgent || '').trim().slice(0, 200) || DEFAULT_UA;
   settings.sortByPing = !!settings.sortByPing;
   settings.showUnsupported = !!settings.showUnsupported;
+  settings.webrtcProtect = !!settings.webrtcProtect;
+  settings.killSwitch = !!settings.killSwitch;
+  settings.siteRules = normalizeRules(settings.siteRules);
+  if (!['auto', 'ru', 'en'].includes(settings.lang)) settings.lang = 'auto';
   if (!['all', 'except', 'only'].includes(settings.mode)) settings.mode = DEFAULT_SETTINGS.mode;
   await chrome.storage.local.set({ settings });
+  setLang(detectLang(settings.lang));
   scheduleAlarms(settings);
   const status = await getStatus();
   if (status.state === 'on') {
     if (settings.port !== state.settings.port) await connect();
-    else await applyProxy(settings);
+    else {
+      await applyProxy(settings);
+      await applyWebRTC(settings);
+    }
   }
   return { settings };
+}
+
+// Правило «этот сайт через VPN / напрямую». route = null убирает правило.
+async function setSiteRule(domain, route) {
+  const state = await loadState();
+  const rules = { ...normalizeRules(state.settings.siteRules) };
+  const key = Object.keys(normalizeRules({ [domain]: 'proxy' }))[0];
+  if (!key) throw new Error(t('Не удалось определить сайт'));
+  if (route === 'proxy' || route === 'direct') rules[key] = route;
+  else delete rules[key];
+  return saveSettings({ siteRules: rules });
 }
 
 async function selectNode(id) {
@@ -607,7 +772,7 @@ async function selectNode(id) {
   if (status.state === 'on' || status.state === 'connecting') await connect();
 }
 
-// ---------- помощник: наличие и версия ----------
+// ---------- помощник: наличие, версия, обновление ----------
 
 async function helperInfo() {
   const { remote } = await chrome.storage.local.get({ remote: null });
@@ -615,21 +780,78 @@ async function helperInfo() {
   const minVer = remoteMin && compareVersions(remoteMin, BRAND.minHelper) > 0 ? remoteMin : BRAND.minHelper;
   const latest = remote?.helper?.latest || null;
   try {
-    const res = await withHelper(() => callHelper('hello', {}, 5000));
+    const c = await withHelper(() => { capsStale = true; return ensureCaps(); });
+    const updateAvailable = !!latest && compareVersions(c.version, latest) < 0;
+    if (updateAvailable) maybeAutoUpdate().catch(() => {});
     return {
       installed: true,
-      version: res.version,
-      core: res.coreVersion,
-      corePath: res.corePath,
-      coreError: res.coreError,
-      outdated: compareVersions(res.version, minVer) < 0,
+      version: c.version,
+      core: c.core,
+      corePath: c.corePath,
+      coreError: c.coreError,
+      xray: c.xrayVersion || null,
+      features: [...c.features],
+      canSelfUpdate: c.features.has('update'),
+      outdated: compareVersions(c.version, minVer) < 0,
       latest,
-      updateAvailable: !!latest && compareVersions(res.version, latest) < 0,
+      updateAvailable,
     };
   } catch (e) {
     const info = hostError(e.message) || { code: 'helper', error: e.message };
     return { installed: false, ...info };
   }
+}
+
+let helperUpdating = null;
+
+// Обновление помощника: он сам скачивает новую версию с GitHub и ставит её.
+// Помощник до 1.1 этого не умеет — тогда пользователь обновляет его вручную.
+function updateHelper() {
+  if (helperUpdating) return helperUpdating;
+  helperUpdating = doUpdateHelper().finally(() => { helperUpdating = null; });
+  return helperUpdating;
+}
+
+async function doUpdateHelper() {
+  const status = await getStatus();
+  if (status.state === 'on' || status.state === 'connecting') {
+    throw new Error(t('Сначала отключи VPN: помощник обновляется, когда соединение выключено.'));
+  }
+  await chrome.storage.local.set({ helperUpdate: { state: 'running', at: Date.now() } });
+  try {
+    const r = await withHelper(async () => {
+      const c = await ensureCaps();
+      if (!c.features.has('update')) throw Object.assign(new Error(t('Эта версия помощника не умеет обновляться сама. Установи новую вручную.')), { code: 'old_helper' });
+      return callHelper('update', {}, 300000);
+    });
+    // Работающий процесс помощника — ещё старый: закрываем его, следующий запуск будет новым.
+    closePort();
+    capsStale = true;
+    caps = null;
+    const result = { state: r.updated ? 'done' : 'current', version: r.version, from: r.previous || null, at: Date.now() };
+    await chrome.storage.local.set({ helperUpdate: result });
+    return result;
+  } catch (e) {
+    const err = helperError(e, 'update');
+    await chrome.storage.local.set({ helperUpdate: { state: 'error', error: err.message, at: Date.now() } });
+    throw err;
+  }
+}
+
+// Тихое обновление в фоне: только когда VPN выключен, помощник ничем не занят
+// и после неудачи прошло хотя бы 6 часов.
+async function maybeAutoUpdate() {
+  if (helperUpdating || helperUsers || connectBusy || testingNow) return;
+  const status = await getStatus();
+  if (status.state === 'on' || status.state === 'connecting') return;
+  const { remote, helperUpdate } = await chrome.storage.local.get({ remote: null, helperUpdate: null });
+  const latest = remote?.helper?.latest;
+  if (!latest) return;
+  if (helperUpdate?.state === 'error' && Date.now() - helperUpdate.at < 6 * 3600e3) return;
+  let c;
+  try { c = await withHelper(() => ensureCaps()); } catch { return; }
+  if (!c.features.has('update') || compareVersions(c.version, latest) >= 0) return;
+  await updateHelper().catch(() => {});
 }
 
 // ---------- удалённый конфиг: версия помощника и рекламный блок ----------
@@ -649,6 +871,7 @@ async function refreshRemote(force = false) {
       fetchedAt: Date.now(),
       helper: { latest: ver(j?.helper?.latest), min: ver(j?.helper?.min) },
       promo: sanitizePromo(j?.promo),
+      promoEn: sanitizePromo(j?.promoEn),
     };
     await chrome.storage.local.set({ remote: next });
     return next;
@@ -657,7 +880,7 @@ async function refreshRemote(force = false) {
   }
 }
 
-async function scheduleAlarms(settings) {
+async function scheduleAlarms() {
   // Раз в час проверяем, какие подписки пора обновить (у каждой свой интервал).
   if ((await chrome.alarms.get('update-subs'))?.periodInMinutes !== 60) {
     chrome.alarms.create('update-subs', { periodInMinutes: 60 });
@@ -682,7 +905,10 @@ const handlers = {
   select: (m) => selectNode(m.id),
   test: (m) => testLatency(m.group),
   saveSettings: (m) => saveSettings(m.settings),
+  setSiteRule: (m) => setSiteRule(m.domain, m.route),
   helperInfo: () => helperInfo(),
+  updateHelper: () => updateHelper(),
+  stats: () => connectionStats(),
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -697,7 +923,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === 'update-subs') updateAllSubscriptions({ onlyStale: true }).catch(() => {});
-  if (a.name === 'remote-config') refreshRemote(true);
+  if (a.name === 'remote-config') refreshRemote(true).then(() => maybeAutoUpdate()).catch(() => {});
+  if (a.name === 'reconnect') tryReconnect();
 });
 
 chrome.proxy.onProxyError.addListener((e) => {
@@ -705,8 +932,8 @@ chrome.proxy.onProxyError.addListener((e) => {
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const state = await loadState();
-  await scheduleAlarms(state.settings);
+  await loadState();
+  await scheduleAlarms();
 });
 
 // Пустой обработчик нужен, чтобы service worker запускался вместе с браузером:
@@ -722,7 +949,8 @@ chrome.runtime.onStartup.addListener(() => {});
     const status = await getStatus();
     if (status.state === 'on' || status.state === 'connecting') await setStatus('off');
     await clearProxy();
+    await clearWebRTC();
   }
-  if (!(await chrome.alarms.get('update-subs'))) await scheduleAlarms(state.settings);
-  refreshRemote();
+  if (!(await chrome.alarms.get('update-subs'))) await scheduleAlarms();
+  refreshRemote().then(() => maybeAutoUpdate()).catch(() => {});
 })();

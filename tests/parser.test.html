@@ -3,7 +3,7 @@
 <pre id="out"></pre>
 <script type="module">
 import { parseLink, parseSubscription, parseUserInfo, parseProfileTitle } from '../extension/lib/parser.js';
-import { buildPac, normalizeDomains, buildRunConfig } from '../extension/lib/singbox.js';
+import { buildPac, normalizeDomains, buildRunConfig, buildNodeConfig, normalizeRules, routeForHost, siteDomain } from '../extension/lib/singbox.js';
 const fx = await (await fetch('fixtures.json')).json();
 const out = document.getElementById('out');
 let pass = 0, fail = 0;
@@ -32,9 +32,14 @@ t('vless grpc', () => {
   eq('vless grpc ipv6 server', n.outbound.server, '2001:db8::1');
   eq('vless grpc transport', n.outbound.transport, { type: 'grpc', service_name: 'gun' });
 });
-t('vless xhttp unsupported', () => {
-  const n = parseLink('vless://u@h.com:443?security=tls&type=xhttp&path=%2F#x');
-  eq('xhttp marked unsupported', !!n.unsupported, true);
+t('vless xhttp -> xray node', () => {
+  const n = parseLink('vless://u1@h.com:443?security=tls&type=xhttp&path=%2Fxp&host=cdn.h.com&mode=auto&sni=s.com&fp=chrome&alpn=h2&extra=%7B%22xPaddingBytes%22%3A%22100-1000%22%7D#x');
+  eq('xhttp: core xray, no sing-box outbound', [n.core, n.unsupported, n.outbound, n.label], ['xray', undefined, undefined, 'VLESS XHTTP']);
+  eq('xhttp: xray outbound', n.xray, { protocol: 'vless', settings: { vnext: [{ address: 'h.com', port: 443, users: [{ id: 'u1', encryption: 'none' }] }] },
+    streamSettings: { network: 'xhttp', security: 'tls', tlsSettings: { serverName: 's.com', fingerprint: 'chrome', alpn: ['h2'] },
+      xhttpSettings: { path: '/xp', host: 'cdn.h.com', mode: 'auto', extra: { xPaddingBytes: '100-1000' } } } });
+  const r = parseLink('vless://u2@1.2.3.4:443?security=reality&type=xhttp&pbk=PK&sid=ab&sni=r.com&path=%2F#r');
+  eq('xhttp reality', r.xray.streamSettings.realitySettings, { serverName: 'r.com', fingerprint: 'chrome', publicKey: 'PK', shortId: 'ab' });
 });
 t('vmess', () => {
   const n = parseLink(fx.vmess);
@@ -100,7 +105,7 @@ t('xray json subscription', () => {
   eq('xray: hysteria v2 -> hysteria2', r.nodes[1].outbound, { type: 'hysteria2', server: 'h.com', server_port: 443, password: 'secret', tls: { enabled: true, server_name: 'h.com', alpn: ['h3'] } });
   eq('xray: ss flat settings', r.nodes[2].outbound, { type: 'shadowsocks', server: '1.2.3.4', server_port: 8388, method: 'chacha20-ietf-poly1305', password: 'pw' });
   eq('xray: ws early data', r.nodes[3].outbound.transport, { type: 'ws', max_early_data: 2048, early_data_header_name: 'Sec-WebSocket-Protocol', path: '/p' });
-  eq('xray: xhttp unsupported', !!r.nodes[4].unsupported, true);
+  eq('xray: xhttp -> xray node keeps original outbound', [r.nodes[4].core, r.nodes[4].xray.streamSettings.xhttpSettings, r.nodes[4].xray.tag], ['xray', { path: '/' }, undefined]);
   eq('xray: auto group', [r.nodes[5].label, r.nodes[5].outbound.type, r.nodes[5].outbound.outbounds, r.nodes[5].members.map((m) => m.type)], ['Авто · 1', 'urltest', ['m0'], ['trojan']]);
   const cfg = buildRunConfig(r.nodes[5].outbound, { port: 1, members: r.nodes[5].members });
   eq('xray: group run config', cfg.outbounds.map((o) => o.tag), ['proxy', 'm0', 'direct']);
@@ -124,6 +129,33 @@ t('panel placeholders (frozen / expired subscription)', () => {
     { remarks: '', outbounds: [{ protocol: 'freedom' }] },
   ])).nodes;
   eq('xray: placeholders become info', xray.map((n) => [n.name, !!n.info]), [['⛔ Подписка заморожена', true], ['Продлите: @bot', true], ['Bad placeholder', true], ['Авто', true]]);
+});
+t('site rules and routing', () => {
+  const rules = normalizeRules({ 'https://www.YouTube.com/watch': 'proxy', 'ya.ru': 'direct', bad: 'x' });
+  eq('normalizeRules', rules, { 'www.youtube.com': 'proxy', 'ya.ru': 'direct' });
+  const opt = { mode: 'except', domains: ['ru'], rules: { 'ya.ru': 'proxy', 'youtube.com': 'direct' } };
+  eq('rule beats list', routeForHost('mail.ya.ru', opt), { route: 'proxy', by: 'rule', match: 'ya.ru' });
+  eq('list in except mode', routeForHost('vk.ru', opt), { route: 'direct', by: 'list', match: 'ru' });
+  eq('rule beats mode', routeForHost('m.youtube.com', opt).route, 'direct');
+  eq('mode default', routeForHost('google.com', opt), { route: 'proxy', by: 'mode' });
+  eq('local', routeForHost('localhost', opt).by, 'local');
+  eq('siteDomain', ['m.youtube.com', 'www.bbc.co.uk', 'example.org', 'a.b.yandex.ru', 'mail.ya.com.ru'].map(siteDomain), ['youtube.com', 'bbc.co.uk', 'example.org', 'yandex.ru', 'ya.com.ru']);
+  const ctx = {
+    dnsDomainIs: (h, d) => h.endsWith(d), isPlainHostName: (h) => !h.includes('.'),
+    shExpMatch: (s, p) => new RegExp('^' + p.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$').test(s),
+  };
+  const pac = (host) => new Function(...Object.keys(ctx), buildPac({ port: 1, mode: 'except', domains: ['ru'], rules: { 'ya.ru': 'proxy', 'mail.ya.ru': 'direct', 'youtube.com': 'direct' } }) + '\nreturn FindProxyForURL("", ' + JSON.stringify(host) + ');')(...Object.values(ctx));
+  eq('pac: rule proxy over except list', pac('ya.ru').startsWith('SOCKS5'), true);
+  eq('pac: longest rule wins', pac('mail.ya.ru'), 'DIRECT');
+  eq('pac: direct rule in except mode', pac('www.youtube.com'), 'DIRECT');
+  eq('pac: list still works', pac('vk.ru'), 'DIRECT');
+});
+t('node configs per core', () => {
+  const x = parseLink('vless://u1@h.com:443?security=tls&type=xhttp#x');
+  const c = buildNodeConfig(x, { port: 1081 });
+  eq('xray config', [c.core, c.config.inbounds[0].protocol, c.config.inbounds[0].port, c.config.outbounds[0].tag, c.config.outbounds[0].protocol], ['xray', 'socks', 1081, 'proxy', 'vless']);
+  const sb = buildNodeConfig(parseLink('hy2://p@h.com:443#h'), { port: 1081 });
+  eq('sing-box config', [sb.core, sb.config.outbounds[0].type], ['sing-box', 'hysteria2']);
 });
 t('clash yaml message', () => {
   eq('clash yaml rejected with hint', parseSubscription('proxies:\n  - name: a').errors.length, 1);

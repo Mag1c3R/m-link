@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "M-Link — VPN client for your browser"
+  },
+  "extShortName": {
+    "message": "M-Link"
+  },
+  "extDescription": {
+    "message": "Connect your browser to your own VPN subscriptions: pick a server, check speed and choose which sites go through the VPN."
+  }
+}

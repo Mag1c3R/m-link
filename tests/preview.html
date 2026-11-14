@@ -69,8 +69,10 @@ const helperOk = { ok: true, installed: true, version: q.get('oldhelper') ? '0.1
   latest: q.get('update') ? '1.1.0' : '1.0.0', updateAvailable: !!q.get('update') };
 window.chrome = {
   storage: { local: area(local), session: area(session), onChanged: { addListener() {} } },
+  tabs: { query: async () => [{ url: q.get('tab') || 'https://www.youtube.com/watch?v=1' }] },
+  i18n: { getUILanguage: () => q.get('ui') || 'ru' },
   runtime: {
-    getManifest: () => ({ version: '1.0' }),
+    getManifest: () => ({ version: '1.1.0' }),
     getPlatformInfo: async () => ({ os: q.get('os') || 'mac', arch: 'arm64' }),
     sendMessage: async (m) => (m.type === 'helperInfo' ? (q.get('nohelper') ? noHelper : helperOk)
       : q.get('nohelper') && ['test', 'connect', 'add', 'updateAll'].includes(m.type)

@@ -2,9 +2,9 @@
 // Хранилище, будильники и прокси — в памяти; connectNative идёт через tests/serve.py к настоящему помощнику.
 // Управление из теста: window.__stub.helperAvailable, window.__stub.proxy, window.__stub.alarms.
 
-export async function installChromeStub({ helperAvailable = true, platform = { os: 'mac', arch: 'arm64' }, local = {}, session = {} } = {}) {
+export async function installChromeStub({ helperAvailable = true, platform = { os: 'mac', arch: 'arm64' }, local = {}, session = {}, tabUrl = 'https://www.youtube.com/watch?v=1', uiLang = 'ru' } = {}) {
   const manifest = await (await fetch('../extension/manifest.json')).json();
-  const stub = { helperAvailable, proxy: null, alarms: {}, badge: {}, ports: 0 };
+  const stub = { helperAvailable, proxy: null, webrtc: null, alarms: {}, badge: {}, ports: 0, tabUrl };
   const clone = (v) => (v === undefined ? undefined : structuredClone(v));
   const storageListeners = [];
 
@@ -123,6 +123,7 @@ export async function installChromeStub({ helperAvailable = true, platform = { o
     },
     alarms: {
       create: (name, info) => { stub.alarms[name] = info; },
+      clear: async (name) => { delete stub.alarms[name]; return true; },
       get: async (name) => (stub.alarms[name] ? { name, ...stub.alarms[name] } : undefined),
       onAlarm,
     },
@@ -134,6 +135,16 @@ export async function installChromeStub({ helperAvailable = true, platform = { o
       },
       onProxyError,
     },
+    privacy: {
+      network: {
+        webRTCIPHandlingPolicy: {
+          set: async ({ value }) => { stub.webrtc = value; },
+          clear: async () => { stub.webrtc = null; },
+        },
+      },
+    },
+    tabs: { query: async () => [{ id: 1, url: stub.tabUrl }] },
+    i18n: { getUILanguage: () => uiLang },
     action: {
       setBadgeText: async ({ text }) => { stub.badge.text = text; },
       setBadgeBackgroundColor: async ({ color }) => { stub.badge.color = color; },
