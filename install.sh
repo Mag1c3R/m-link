@@ -24,7 +24,7 @@ if [ "$os" = darwin ] && [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" 
 name="m-link-helper-$os-$arch"
 TMP=$(mktemp -d)
 trap 'rm -rf "${TMP:?}"' EXIT
-echo "Скачиваю $name…"
+echo "Скачиваю ${name}…"
 curl -fL --progress-bar -o "$TMP/helper.tar.gz" "$BASE_URL/$name.tar.gz"
 tar -xzf "$TMP/helper.tar.gz" -C "$TMP"
 sh "$TMP/$name/install.sh"
