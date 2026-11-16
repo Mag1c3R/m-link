@@ -18,6 +18,9 @@ const DEFAULT_SETTINGS = {
   showUnsupported: false,
   webrtcProtect: true, // не давать WebRTC показывать настоящий IP в обход прокси
   killSwitch: false, // при обрыве не пускать сайты мимо VPN
+  autoSwitch: true, // если сервер перестал отвечать, переключаться на следующий по пингу
+  hideDead: true, // после замера скрывать серверы, которые не ответили
+  quickPing: true, // при открытии popup обновлять пинг лучших серверов
   lang: 'auto', // auto | ru | en
 };
 
@@ -285,12 +288,14 @@ async function clearWebRTC() {
 
 let connectChain = Promise.resolve();
 
-function connect() {
-  connectChain = connectChain.then(doConnect, doConnect);
+// failover: подключение запущено автозаменой сервера, а не пользователем.
+function connect(opts = {}) {
+  const run = () => doConnect(opts);
+  connectChain = connectChain.then(run, run);
   return connectChain;
 }
 
-async function doConnect() {
+async function doConnect({ failover = false } = {}) {
   const state = await loadState();
   let node = findNode(state, state.selectedId);
   if (!node) {
@@ -316,12 +321,16 @@ async function doConnect() {
     await applyProxy(state.settings);
     await applyWebRTC(state.settings);
     stopReconnect();
+    if (!failover) resetHealth();
     await setStatus('on', {
       nodeId: node.id, nodeName: node.name, since: Date.now(), core: res.core || 'sing-box', coreVersion: res.coreVersion || '',
+      group: !!node.members,
     });
+    startHealth();
     return { ok: true };
   } catch (e) {
     const err = helperError(e, 'start');
+    stopHealth();
     if (coreActive) {
       // Ядро запустилось, но прокси применить не удалось: останавливаем его.
       try { await callHelper('stop', {}, 5000); } catch { /* помощник уже недоступен */ }
@@ -347,6 +356,8 @@ async function doConnect() {
 
 async function disconnect() {
   stopReconnect();
+  stopHealth();
+  resetHealth();
   await chrome.storage.local.set({ wantConnected: false });
   await clearProxy();
   await clearWebRTC();
@@ -361,6 +372,7 @@ async function disconnect() {
 // Соединение оборвалось само (ядро упало, помощник закрылся).
 async function connectionLost(info) {
   coreActive = false;
+  stopHealth();
   const status = await getStatus();
   if (status.state !== 'on' && status.state !== 'connecting') return;
   const state = await loadState();
@@ -416,6 +428,97 @@ async function tryReconnect() {
   if (!state.wantConnected || status.state === 'on') { stopReconnect(); return; }
   if (status.state === 'connecting') return;
   connect().catch(() => {});
+}
+
+// ---------- автозамена сервера ----------
+// Раз в минуту проверяем запросом через ядро, что сервер отвечает. Два провала подряд при работающем
+// интернете — переключаемся на следующий сервер по пингу. Группы «Авто» делают это сами внутри sing-box.
+
+const HEALTH_MAX_SWITCHES = 5;
+const health = { fails: 0, switches: 0, tried: new Set(), timer: null, busy: false };
+
+function resetHealth() {
+  health.fails = 0;
+  health.switches = 0;
+  health.tried = new Set();
+}
+
+function startHealth() {
+  clearTimeout(health.timer);
+  chrome.alarms.create('health', { periodInMinutes: 1 });
+  // Первая проверка вскоре после подключения: мёртвый сервер заметим сразу, а не через минуту.
+  health.timer = setTimeout(checkHealth, 4000);
+}
+
+function stopHealth() {
+  clearTimeout(health.timer);
+  health.timer = null;
+  chrome.alarms.clear('health');
+}
+
+async function probe(direct) {
+  const r = await callHelper('probe', { url: TEST_URL, timeoutMs: 6000, direct }, 12000);
+  return r.ms;
+}
+
+async function checkHealth() {
+  if (health.busy || connectBusy || !coreActive) return;
+  const status = await getStatus();
+  if (status.state !== 'on' || status.group) return;
+  const { settings } = await chrome.storage.local.get({ settings: {} });
+  if (settings.autoSwitch === false) return;
+  health.busy = true;
+  try {
+    const c = await ensureCaps();
+    if (!c.features.has('probe')) return; // старый помощник: без автозамены
+    if ((await probe(false)) > 0) { health.fails = 0; return; }
+    health.fails++;
+    if (health.fails < 2) {
+      clearTimeout(health.timer);
+      health.timer = setTimeout(checkHealth, 2000);
+      return;
+    }
+    // Сервер не отвечает. Если не отвечает и интернет напрямую, сервер ни при чём — ждём.
+    if ((await probe(true)) <= 0) { health.fails = 0; return; }
+    health.fails = 0;
+    await switchServer(status);
+  } catch {
+    /* помощник занят или отключился — проверим в следующий раз */
+  } finally {
+    health.busy = false;
+  }
+}
+
+// Следующий сервер: из той же подписки, сначала с лучшим пингом, потом ещё не проверенные.
+function pickNextNode(state, failedId) {
+  const sub = state.subs.find((x) => (x.nodes || []).some((n) => n.id === failedId));
+  const pool = sub ? sub.nodes : state.manual.some((n) => n.id === failedId) ? state.manual : allNodes(state);
+  const ok = (n) => usable(n) && !n.members && !health.tried.has(n.id) && !(state.latency[n.id] < 0);
+  const rank = (n) => (state.latency[n.id] > 0 ? state.latency[n.id] : 1e6);
+  const pick = (list) => list.map((n, i) => ({ n, i })).filter(({ n }) => ok(n))
+    .sort((a, b) => rank(a.n) - rank(b.n) || a.i - b.i)[0]?.n;
+  return pick(pool) || pick(allNodes(state));
+}
+
+async function switchServer(status) {
+  const state = await loadState();
+  health.tried.add(status.nodeId);
+  const { latency } = await chrome.storage.local.get({ latency: {} });
+  await chrome.storage.local.set({ latency: { ...latency, [status.nodeId]: -1 } });
+  const next = health.switches < HEALTH_MAX_SWITCHES ? pickNextNode({ ...state, latency: { ...latency, [status.nodeId]: -1 } }, status.nodeId) : null;
+  if (!next) {
+    stopHealth();
+    await chrome.storage.session.set({ notice: {
+      text: t('Сервер «{0}» не отвечает, а замены не нашлось. Проверь пинг и выбери другой сервер.', status.nodeName || ''), at: Date.now(), error: true,
+    } });
+    return;
+  }
+  health.switches++;
+  await chrome.storage.local.set({ selectedId: next.id });
+  await chrome.storage.session.set({ notice: {
+    text: t('«{0}» перестал отвечать. Переключился на «{1}».', status.nodeName || '', next.name), at: Date.now(),
+  } });
+  connect({ failover: true }).catch(() => {});
 }
 
 // ---------- подписки ----------
@@ -631,7 +734,30 @@ async function testLatency(group) {
   // Группы «Авто» сами выбирают лучший узел внутри sing-box, отдельно их не меряем.
   nodes = nodes.filter((n) => usable(n) && !n.members);
   if (!nodes.length) return { results: {} };
+  return testNodes(group, nodes, false);
+}
 
+// Быстрый пинг при открытии popup: выбранный сервер и двадцать лучших по прошлому замеру.
+// Старые значения остаются на экране, пока не придут новые.
+async function quickTest() {
+  if (testingNow) return { skipped: true };
+  const state = await loadState();
+  if (!state.settings.quickPing) return { skipped: true };
+  const { quickAt } = await chrome.storage.session.get({ quickAt: 0 });
+  if (Date.now() - quickAt < 5 * 60e3) return { skipped: true };
+  const nodes = allNodes(state).filter((n) => usable(n) && !n.members);
+  if (!nodes.length) return { skipped: true };
+  await chrome.storage.session.set({ quickAt: Date.now() });
+  const lat = state.latency;
+  let pick = nodes.filter((n) => lat[n.id] > 0).sort((a, b) => lat[a.id] - lat[b.id]).slice(0, 20);
+  if (!pick.length) pick = nodes.slice(0, 20);
+  const selected = nodes.find((n) => n.id === state.selectedId);
+  if (selected && !pick.includes(selected)) pick.unshift(selected);
+  return testNodes('quick', pick, true);
+}
+
+async function testNodes(group, nodes, quick) {
+  if (testingNow) throw new Error(t('Замер пинга уже идёт'));
   testingNow = true;
   try {
     return await withHelper(async () => {
@@ -642,20 +768,26 @@ async function testLatency(group) {
       const skipped = c.features.has('xray') ? 0 : nodes.filter((n) => n.core === 'xray').length;
       if (skipped) nodes = nodes.filter((n) => n.core !== 'xray');
       if (!nodes.length) return { tested: 0, alive: 0, skipped };
-      return await runTest(group, nodes, skipped);
+      return await runTest(group, nodes, skipped, quick);
     });
   } finally {
     testingNow = false;
   }
 }
 
-async function runTest(group, nodes, skipped) {
-  // Старые значения убираем, чтобы было видно, какие узлы уже перемерены.
+// В горячих местах читаем из хранилища только пинги, а не всё состояние с подписками на мегабайт.
+async function readLatency() {
+  return (await chrome.storage.local.get({ latency: {} })).latency;
+}
+
+async function runTest(group, nodes, skipped, quick) {
   const ids = new Set(nodes.map((n) => n.id));
-  const start = await loadState();
-  const cleared = Object.fromEntries(Object.entries(start.latency).filter(([id]) => !ids.has(id)));
-  await chrome.storage.local.set({ latency: cleared });
-  const testing = { group: group || 'all', count: nodes.length, done: 0 };
+  if (!quick) {
+    // Старые значения убираем, чтобы было видно, какие узлы уже перемерены.
+    const before = await readLatency();
+    await chrome.storage.local.set({ latency: Object.fromEntries(Object.entries(before).filter(([id]) => !ids.has(id))) });
+  }
+  const testing = { group: group || 'all', count: nodes.length, done: 0, quick: !!quick };
   await chrome.storage.session.set({ testing });
 
   // Результаты приходят по одному; сохраняем их пачками, чтобы popup показывал пинг сразу,
@@ -671,8 +803,7 @@ async function runTest(group, nodes, skipped) {
     if (!Object.keys(batch).length) return flushing;
     testing.done += Object.keys(batch).length;
     flushing = flushing.then(async () => {
-      const fresh = await loadState();
-      await chrome.storage.local.set({ latency: { ...fresh.latency, ...batch } });
+      await chrome.storage.local.set({ latency: { ...(await readLatency()), ...batch } });
       await chrome.storage.session.set({ testing: { ...testing } });
     });
     return flushing;
@@ -700,8 +831,7 @@ async function runTest(group, nodes, skipped) {
     buffer = {};
     await flush();
     // Итог помощника полный: на случай, если какие-то промежуточные сообщения потерялись.
-    const fresh = await loadState();
-    await chrome.storage.local.set({ latency: { ...fresh.latency, ...res.results } });
+    await chrome.storage.local.set({ latency: { ...(await readLatency()), ...res.results } });
     const alive = Object.values(res.results).filter((ms) => ms > 0).length;
     return { tested: nodes.length, alive, method: res.method, skipped };
   } finally {
@@ -738,6 +868,9 @@ async function saveSettings(patch) {
   settings.showUnsupported = !!settings.showUnsupported;
   settings.webrtcProtect = !!settings.webrtcProtect;
   settings.killSwitch = !!settings.killSwitch;
+  settings.autoSwitch = !!settings.autoSwitch;
+  settings.hideDead = !!settings.hideDead;
+  settings.quickPing = !!settings.quickPing;
   settings.siteRules = normalizeRules(settings.siteRules);
   if (!['auto', 'ru', 'en'].includes(settings.lang)) settings.lang = 'auto';
   if (!['all', 'except', 'only'].includes(settings.mode)) settings.mode = DEFAULT_SETTINGS.mode;
@@ -854,6 +987,70 @@ async function maybeAutoUpdate() {
   await updateHelper().catch(() => {});
 }
 
+// ---------- отчёт для поддержки ----------
+
+// Убирает из текста возможные секреты: пути ссылок, UUID, длинные ключи, хвосты IP-адресов.
+function redact(text) {
+  const keep = [];
+  return String(text)
+    .replace(/chrome-extension:\/\/[a-p]{32}/g, (m) => { keep.push(m); return `\u0000${keep.length - 1}\u0000`; })
+    .replace(/(https?):\/\/([^/\s"'?#]+)[^\s"']*/g, '$1://$2/…')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>')
+    .replace(/[A-Za-z0-9_+/=-]{24,}/g, '<…>')
+    .replace(/\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b/g, (m, a) => (m.startsWith('127.') || m === '0.0.0.0' ? m : `${a}.x.x`))
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => keep[Number(i)] || '');
+}
+
+// Отчёт составляется только по нажатию кнопки и попадает в буфер обмена: сам он никуда не отправляется.
+async function diagReport() {
+  const state = await loadState();
+  const status = await getStatus();
+  const s = state.settings;
+  const nodes = allNodes(state);
+  const node = nodes.find((n) => n.id === (status.nodeId || state.selectedId));
+  const chrome_ = (navigator.userAgent.match(/(Chrome|Edg|YaBrowser)\/[\d.]+/g) || []).join(' ') || navigator.userAgent;
+  let platform = '';
+  try { const p = await chrome.runtime.getPlatformInfo(); platform = `${p.os} ${p.arch}`; } catch { /* неважно */ }
+
+  let helperLine;
+  let log = '';
+  try {
+    await withHelper(async () => {
+      capsStale = true;
+      const c = await ensureCaps();
+      helperLine = `Помощник ${c.version} · sing-box ${c.core || c.coreError || '?'} · xray ${c.xrayVersion || 'нет'}`;
+      if (c.features.has('diag')) {
+        const d = await callHelper('diag', {}, 8000);
+        helperLine += ` · система ${d.os} ${d.arch}${d.core ? ` · запущено ядро ${d.core}` : ''}`;
+        log = d.log || '';
+      } else {
+        log = '(эта версия помощника не отдаёт журнал)';
+      }
+    });
+  } catch (e) {
+    helperLine = `Помощник: ${(hostError(e.message) || {}).error || e.message}`;
+  }
+
+  const ago = (ms) => (ms ? `${Math.round((Date.now() - ms) / 60000)} мин назад` : 'никогда');
+  const lines = [
+    `M-Link ${chrome.runtime.getManifest().version} · ${chrome_} · ${platform} · язык ${detectLang(s.lang)}`,
+    helperLine,
+    `Состояние: ${status.state}${status.code ? ` (${status.code})` : ''}${status.error ? ` — ${status.error}` : ''}${status.detail ? ` — ${status.detail}` : ''}`,
+    `Сервер: ${node ? `${node.label || node.type}, ядро ${node.core || 'sing-box'}${node.members ? `, группа из ${node.members.length}` : ''}` : 'не выбран'}`,
+    `Режим: ${s.mode} · правил для сайтов: ${Object.keys(s.siteRules || {}).length} · порт ${s.port}`,
+    `WebRTC-защита: ${s.webrtcProtect ? 'вкл' : 'выкл'} · kill switch: ${s.killSwitch ? 'вкл' : 'выкл'} · автозамена: ${s.autoSwitch ? 'вкл' : 'выкл'}`,
+    ...state.subs.map((sub, i) => {
+      const ns = sub.nodes || [];
+      return `Подписка ${i + 1}: серверов ${ns.filter(usable).length}, через xray ${ns.filter((n) => n.core === 'xray').length}, не поддерж. ${ns.filter((n) => n.unsupported).length}, сообщений ${ns.filter((n) => n.info).length}, обновлена ${ago(sub.updatedAt)}${sub.error ? `, ошибка: ${sub.error}` : ''}`;
+    }),
+    `Своих серверов: ${state.manual.length} · пинг известен для ${Object.keys(state.latency).length}, отвечают ${Object.values(state.latency).filter((ms) => ms > 0).length}`,
+    '',
+    '--- журнал помощника ---',
+    log || '(пусто)',
+  ];
+  return { text: redact(lines.join('\n')) };
+}
+
 // ---------- удалённый конфиг: версия помощника и рекламный блок ----------
 
 async function refreshRemote(force = false) {
@@ -904,6 +1101,9 @@ const handlers = {
   removeManual: (m) => removeManual(m.id),
   select: (m) => selectNode(m.id),
   test: (m) => testLatency(m.group),
+  // Popup открыли: обновляем пинг лучших серверов, не задерживая ответ.
+  quickTest: () => { quickTest().catch(() => {}); return {}; },
+  diag: () => diagReport(),
   saveSettings: (m) => saveSettings(m.settings),
   setSiteRule: (m) => setSiteRule(m.domain, m.route),
   helperInfo: () => helperInfo(),
@@ -925,6 +1125,7 @@ chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === 'update-subs') updateAllSubscriptions({ onlyStale: true }).catch(() => {});
   if (a.name === 'remote-config') refreshRemote(true).then(() => maybeAutoUpdate()).catch(() => {});
   if (a.name === 'reconnect') tryReconnect();
+  if (a.name === 'health') checkHealth();
 });
 
 chrome.proxy.onProxyError.addListener((e) => {

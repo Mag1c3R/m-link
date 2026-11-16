@@ -20,6 +20,9 @@ let tabHost = null; // сайт в текущей вкладке
 let speed = null; // { down, up } байт/с
 // Порядок узлов на момент запуска замера: пока пинг приходит, строки не прыгают.
 const orderSnapshot = new Map();
+// Строки списка по id узла: чтобы менять пинг в одной строке, а не перерисовывать весь список.
+const rowById = new Map();
+let listTimer = null;
 const collapsed = new Set(readStored('collapsed', []));
 
 function readStored(key, fallback) {
@@ -53,13 +56,29 @@ function onError(e) {
   renderHero();
 }
 
-function toast(text, isError = false) {
+function toast(text, isError = false, ms = 0) {
   const el = $('toast');
   el.textContent = text;
   el.className = 'toast' + (isError ? ' error' : '');
   el.hidden = false;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { el.hidden = true; }, isError ? 5000 : 2500);
+  toast.timer = setTimeout(() => { el.hidden = true; }, ms || (isError ? 5000 : 2500));
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Буфер обмена недоступен напрямую: копируем через временное поле.
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (!ok) throw new Error(t('Не удалось скопировать'));
+  }
 }
 
 async function busy(btn, fn) {
@@ -403,6 +422,9 @@ function visibleNodes(nodes, groupId) {
   const s = state.settings;
   let list = nodes.map((n, i) => ({ n, i }));
   if (!s.showUnsupported) list = list.filter(({ n }) => !n.unsupported || n.id === state.selectedId);
+  // Недоступные скрываем только после замера (во время него строки стоят на месте) и не при поиске:
+  // если человек ищет конкретный сервер, он должен его найти.
+  if (hidesDead(groupId)) list = list.filter(({ n }) => !(state.latency[n.id] < 0) || n.id === state.selectedId);
   list = list.filter(({ n }) => n.info || matches(n));
   const snap = isTesting(groupId) ? orderSnapshot.get(groupId) : null;
   if (snap) {
@@ -424,10 +446,17 @@ function visibleNodes(nodes, groupId) {
   return list.map((x) => x.n);
 }
 
-function countText(nodes) {
+function hidesDead(groupId) {
+  return !!state.settings.hideDead && !filter && !isTesting(groupId);
+}
+
+function countText(nodes, groupId) {
   const bad = nodes.filter((n) => n.unsupported).length;
-  const good = nodes.filter((n) => !n.unsupported && !n.info).length;
-  return t('{0} узл.', good) + (bad && !state.settings.showUnsupported ? t(' (+{0} не поддерж.)', bad) : '');
+  const usable = nodes.filter((n) => !n.unsupported && !n.info);
+  const dead = hidesDead(groupId) ? usable.filter((n) => state.latency[n.id] < 0 && n.id !== state.selectedId).length : 0;
+  return t('{0} узл.', usable.length - dead)
+    + (dead ? t(' (+{0} недоступны)', dead) : '')
+    + (bad && !state.settings.showUnsupported ? t(' (+{0} не поддерж.)', bad) : '');
 }
 
 function groupHtml({ id, name, meta, nodes, traffic, canDelete, actions, announce }) {
@@ -436,7 +465,9 @@ function groupHtml({ id, name, meta, nodes, traffic, canDelete, actions, announc
   const isCollapsed = collapsed.has(id) && !filter;
   const body = shown.length
     ? shown.map((n) => nodeRow(n, canDelete, id)).join('')
-    : `<div class="node unsupported"><span class="node-name">${nodes.length ? t('Нет узлов, которые поддерживает расширение') : t('Сервис не прислал ни одного сервера')}</span></div>`;
+    : `<div class="node unsupported"><span class="node-name">${!nodes.length ? t('Сервис не прислал ни одного сервера')
+      : nodes.some((n) => !n.unsupported && !n.info) ? t('Ни один сервер не ответил. Проверь пинг ещё раз.')
+        : t('Нет узлов, которые поддерживает расширение')}</span></div>`;
   return `<div class="group ${isCollapsed ? 'collapsed' : ''}" data-group="${esc(id)}">
     <div class="group-head" data-toggle="${esc(id)}">
       ${ICON.chev}
@@ -453,7 +484,7 @@ function groupHtml({ id, name, meta, nodes, traffic, canDelete, actions, announc
 }
 
 function subMeta(sub) {
-  const parts = [countText(sub.nodes)];
+  const parts = [countText(sub.nodes, sub.id)];
   const ui = sub.userinfo;
   if (ui && (ui.total || ui.download || ui.upload)) {
     const used = (ui.upload || 0) + (ui.download || 0);
@@ -465,8 +496,9 @@ function subMeta(sub) {
   return esc(parts.join(' · '));
 }
 
+// Идёт полный замер этой группы (быстрый пинг при открытии сюда не относится: он строки не замораживает).
 function isTesting(group) {
-  return !!testing && (testing.group === group || testing.group === 'all');
+  return !!testing && !testing.quick && (testing.group === group || testing.group === 'all');
 }
 
 function renderList() {
@@ -493,7 +525,7 @@ function renderList() {
     groups.push(groupHtml({
       id: 'manual',
       name: t('Мои узлы'),
-      meta: esc(`${countText(state.manual)} · ${t('добавлены вручную')}`),
+      meta: esc(`${countText(state.manual, 'manual')} · ${t('добавлены вручную')}`),
       nodes: state.manual,
       canDelete: true,
       actions: `<button class="icon-btn ${isTesting('manual') ? 'spin' : ''}" data-test="manual" title="${t('Проверить задержку')}" aria-label="${t('Проверить задержку')}">${ICON.bolt}</button>`,
@@ -513,6 +545,40 @@ function renderList() {
   $('add-panel').hidden = hasAny ? $('add-panel').hidden : false;
   for (const id of ['search', 'test-all', 'update-all']) $(id).style.visibility = hasAny ? '' : 'hidden';
   $('test-all').classList.toggle('spin', isTesting('all'));
+  rowById.clear();
+  for (const row of list.querySelectorAll('.node[data-node]')) rowById.set(row.dataset.node, row);
+}
+
+// Перерисовка списка не чаще раза в 60 мс: несколько изменений подряд дают одну перерисовку.
+function scheduleList() {
+  if (listTimer) return;
+  listTimer = setTimeout(() => {
+    listTimer = null;
+    renderList();
+    renderFoot();
+  }, 60);
+}
+
+// Меняет пинг в одной строке, не трогая остальной список.
+function patchPing(id) {
+  const cell = rowById.get(id)?.querySelector('.ping');
+  if (!cell) return;
+  const ms = state.latency[id];
+  if (ms == null) {
+    if (!cell.classList.contains('wait')) { cell.className = 'ping'; cell.textContent = ''; }
+    return;
+  }
+  cell.className = 'ping ' + pingClass(ms);
+  cell.textContent = pingText(ms);
+}
+
+function updateSelection() {
+  for (const el of $('list').querySelectorAll('.node.selected')) el.classList.remove('selected', 'active');
+  const row = rowById.get(state.selectedId);
+  if (row) {
+    row.classList.add('selected');
+    row.classList.toggle('active', status.state === 'on');
+  }
 }
 
 function promoCard() {
@@ -529,7 +595,7 @@ function renderFoot() {
   const p = promo();
   const hasAny = state.subs.length || state.manual.length;
   const left = testing
-    ? t('Замер пинга: {0} из {1}', testing.done || 0, testing.count)
+    ? t(testing.quick ? 'Обновляю пинг: {0} из {1}' : 'Замер пинга: {0} из {1}', testing.done || 0, testing.count)
     : t('{0} узлов', allNodes().filter((n) => !n.unsupported && !n.info).length);
   const right = p.enabled && hasAny ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.button)} →</a>` : '';
   $('foot').innerHTML = `<span>${esc(left)}</span>${right}`;
@@ -537,6 +603,8 @@ function renderFoot() {
 
 function render() {
   if (!state) return;
+  clearTimeout(listTimer);
+  listTimer = null;
   renderHero();
   renderSetup();
   renderSite();
@@ -628,6 +696,9 @@ function fillSettings() {
   $('show-unsupported').checked = !!s.showUnsupported;
   $('webrtc-protect').checked = s.webrtcProtect !== false;
   $('kill-switch').checked = !!s.killSwitch;
+  $('auto-switch').checked = s.autoSwitch !== false;
+  $('hide-dead').checked = s.hideDead !== false;
+  $('quick-ping').checked = s.quickPing !== false;
   $('lang').value = s.lang || 'auto';
   renderRules();
   $('about').innerHTML = `${esc(BRAND.name)} ${esc(VERSION)} · <a href="${esc(BRAND.repoUrl)}" target="_blank" rel="noopener">${t('Исходный код')}</a> · <a href="${esc(BRAND.repoUrl)}/blob/main/PRIVACY.md" target="_blank" rel="noopener">${t('Конфиденциальность')}</a>`;
@@ -663,6 +734,47 @@ function closeSettings() {
   $('view-settings').hidden = true;
   $('view-main').hidden = false;
 }
+
+// ---------- тема: авто / светлая / тёмная ----------
+
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const THEME_ICON = {
+  light: '<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="4" fill="currentColor"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
+  dark: '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg>',
+};
+
+function themePref() {
+  const v = readStored('theme', 'auto');
+  return v === 'light' || v === 'dark' ? v : 'auto';
+}
+
+// Тема, которая сейчас на экране: выбранная вручную или системная.
+function shownTheme() {
+  const pref = themePref();
+  return pref === 'auto' ? (darkQuery.matches ? 'dark' : 'light') : pref;
+}
+
+function applyTheme() {
+  const pref = themePref();
+  if (pref === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = pref;
+  $('theme-auto').classList.toggle('off', pref !== 'auto');
+  $('theme-auto').setAttribute('aria-pressed', String(pref === 'auto'));
+  const icon = $('theme-icon');
+  icon.innerHTML = THEME_ICON[shownTheme()];
+  icon.classList.toggle('off', pref === 'auto');
+}
+
+function setTheme(pref) {
+  writeStored('theme', pref);
+  applyTheme();
+}
+
+// «Авто» включает системную тему; повторное нажатие закрепляет ту, что сейчас на экране.
+$('theme-auto').addEventListener('click', () => setTheme(themePref() === 'auto' ? shownTheme() : 'auto'));
+// Значок переключает светлую и тёмную тему вручную.
+$('theme-icon').addEventListener('click', () => setTheme(shownTheme() === 'dark' ? 'light' : 'dark'));
+darkQuery.addEventListener('change', applyTheme);
 
 // ---------- события ----------
 
@@ -724,7 +836,11 @@ async function runTest(group) {
   snapshotOrder(group);
   try {
     const r = await send('test', { group });
-    if (r.tested) toast(t('Работают {0} из {1}', r.alive, r.tested) + (r.skipped ? t('. {0} серверов XHTTP: обнови помощник', r.skipped) : ''));
+    if (r.tested) {
+      toast(t('Работают {0} из {1}', r.alive, r.tested)
+        + (state.settings.hideDead && r.alive < r.tested ? t('. Недоступные скрыты') : '')
+        + (r.skipped ? t('. {0} серверов XHTTP: обнови помощник', r.skipped) : ''));
+    }
     else if (r.skipped) onError({ code: 'helper_feature', message: t('Чтобы проверять серверы XHTTP, обнови помощник.') });
   } finally {
     if (group) orderSnapshot.delete(group); else orderSnapshot.clear();
@@ -815,6 +931,12 @@ $('setup').addEventListener('click', async (e) => {
   }
 });
 
+$('copy-report').addEventListener('click', (e) => busy(e.currentTarget, async () => {
+  const r = await send('diag');
+  await copyText(r.text);
+  toast(t('Отчёт скопирован. Вставь его в сообщение поддержке.'), false, 4000);
+}));
+
 $('open-settings').addEventListener('click', openSettings);
 $('mode-chip').addEventListener('click', openSettings);
 $('close-settings').addEventListener('click', closeSettings);
@@ -844,6 +966,9 @@ $('save-settings').addEventListener('click', async () => {
         showUnsupported: $('show-unsupported').checked,
         webrtcProtect: $('webrtc-protect').checked,
         killSwitch: $('kill-switch').checked,
+        autoSwitch: $('auto-switch').checked,
+        hideDead: $('hide-dead').checked,
+        quickPing: $('quick-ping').checked,
         lang: $('lang').value,
       },
     });
@@ -858,29 +983,104 @@ $('save-settings').addEventListener('click', async () => {
 
 // ---------- загрузка и подписка на изменения ----------
 
+function withDefaults(settings) {
+  return {
+    mode: 'except', exceptList: '', onlyList: '', port: 10808, updateHours: 12, userAgent: DEFAULT_UA,
+    sortByPing: true, showUnsupported: false, webrtcProtect: true, killSwitch: false, lang: 'auto', siteRules: {},
+    autoSwitch: true, hideDead: true, quickPing: true,
+    ...settings,
+  };
+}
+
+// Полная загрузка — один раз при открытии. Дальше состояние обновляется по событиям хранилища.
 async function load() {
   const local = await chrome.storage.local.get({
     subs: [], manual: [], selectedId: null, latency: {}, settings: {}, remote: null, helperUpdate: null,
   });
-  const session = await chrome.storage.session.get({ status: { state: 'off' }, testing: null });
-  state = {
-    ...local,
-    settings: {
-      mode: 'except', exceptList: '', onlyList: '', port: 10808, updateHours: 12, userAgent: DEFAULT_UA,
-      sortByPing: true, showUnsupported: false, webrtcProtect: true, killSwitch: false, lang: 'auto', siteRules: {},
-      ...local.settings,
-    },
-  };
-  const prevUpdate = helperUpdate;
+  const session = await chrome.storage.session.get({ status: { state: 'off' }, testing: null, notice: null });
+  state = { ...local, settings: withDefaults(local.settings) };
   helperUpdate = local.helperUpdate;
-  if (prevUpdate?.state === 'running' && helperUpdate?.state === 'done') {
-    toast(t('Помощник обновлён до {0}', helperUpdate.version));
-    checkHelper();
-  }
   status = session.status;
   testing = session.testing && typeof session.testing === 'object' ? session.testing : null;
   syncStatsTimer();
   render();
+  showNotice(session.notice);
+}
+
+// Сообщение от фоновой части (например, об автозамене сервера): показываем один раз.
+function showNotice(n) {
+  if (!n?.text || Date.now() - n.at > 10 * 60e3) return;
+  if (readStored('noticeSeen', 0) >= n.at) return;
+  writeStored('noticeSeen', n.at);
+  toast(n.text, !!n.error, 7000);
+}
+
+// Хранилище сообщает, что именно изменилось: берём новые значения из события и перерисовываем
+// только затронутое. Раньше на каждое изменение popup заново читал всё состояние (подписка на
+// мегабайт) и перерисовывал весь список — во время замера пинга это происходило четыре раза в секунду.
+function applyChanges(changes, area) {
+  if (!state) return;
+  if (area === 'session') {
+    if (changes.status) {
+      status = changes.status.newValue || { state: 'off' };
+      syncStatsTimer();
+      renderHero();
+      updateSelection();
+    }
+    if (changes.testing) {
+      const was = testing;
+      const v = changes.testing.newValue;
+      testing = v && typeof v === 'object' ? v : null;
+      renderFoot();
+      // Начало и конец замера меняют вид списка (ожидание, сортировка, скрытие недоступных);
+      // промежуточный прогресс — только счётчик в подвале.
+      if (!!was !== !!testing || was?.group !== testing?.group) scheduleList();
+    }
+    if (changes.notice) showNotice(changes.notice.newValue);
+    return;
+  }
+  if (area !== 'local') return;
+  let full = false;
+  let list = false;
+  for (const [key, change] of Object.entries(changes)) {
+    const v = change.newValue;
+    if (key === 'latency') {
+      const old = state.latency;
+      state.latency = v || {};
+      const ids = new Set([...Object.keys(old), ...Object.keys(state.latency)]);
+      const changed = [...ids].filter((id) => old[id] !== state.latency[id]);
+      const frozen = !!testing && !testing.quick; // во время полного замера порядок строк заморожен
+      if (changed.length > 150) list = true;
+      else {
+        for (const id of changed) patchPing(id);
+        if (!frozen && changed.length) list = true; // порядок или видимость могли измениться
+      }
+    } else if (key === 'selectedId') {
+      state.selectedId = v ?? null;
+      renderHero();
+      updateSelection();
+      list = true;
+    } else if (key === 'helperUpdate') {
+      const prev = helperUpdate;
+      helperUpdate = v || null;
+      if (prev?.state === 'running' && helperUpdate?.state === 'done') {
+        toast(t('Помощник обновлён до {0}', helperUpdate.version));
+        checkHelper();
+      }
+      renderSetup();
+    } else if (key === 'settings') {
+      state.settings = withDefaults(v);
+      full = true;
+    } else if (key === 'subs' || key === 'manual') {
+      state[key] = v || [];
+      full = true;
+    } else if (key === 'remote') {
+      state.remote = v || null;
+      full = true;
+    }
+  }
+  if (full) render();
+  else if (list) scheduleList();
 }
 
 async function readTab() {
@@ -891,7 +1091,7 @@ async function readTab() {
   } catch { /* нет вкладки или нет доступа — переключатель не показываем */ }
 }
 
-chrome.storage.onChanged.addListener(() => load());
+chrome.storage.onChanged.addListener(applyChanges);
 
 (async () => {
   // Язык выбираем до первой отрисовки, чтобы не было мигания русского текста.
@@ -900,6 +1100,7 @@ chrome.storage.onChanged.addListener(() => load());
   document.documentElement.lang = getLang();
   translateDom(document.body);
   $('brand-name').textContent = BRAND.name;
+  applyTheme();
   await readTab();
   await load();
   chrome.runtime.getPlatformInfo().then((p) => { platform = p; renderSetup(); }).catch(() => {});
@@ -907,4 +1108,6 @@ chrome.storage.onChanged.addListener(() => load());
   // Подписки старше 30 минут обновляются в фоне, пока popup открыт: так заморозка
   // или новые серверы видны сразу, а не через несколько часов.
   if (state.subs.length) send('refreshStale').catch(() => {});
+  // И обновляем пинг лучших серверов, чтобы список сразу был актуальным.
+  if (state.subs.length || state.manual.length) send('quickTest').catch(() => {});
 })();

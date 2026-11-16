@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>M-Link</title>
   <link rel="stylesheet" href="popup.css">
+  <script src="theme.js"></script>
 </head>
 <body>
   <div id="app">
@@ -71,7 +72,10 @@
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6"/></svg>
         </button>
         <div class="brand"><span>Настройки</span></div>
-        <span style="width:32px"></span>
+        <div class="theme-switch" id="theme-switch" role="group" aria-label="Тема">
+          <button type="button" class="t-auto" id="theme-auto" title="Тема как в системе">Авто</button>
+          <button type="button" class="t-icon" id="theme-icon" title="Светлая или тёмная тема" aria-label="Светлая или тёмная тема"></button>
+        </div>
       </header>
 
       <div class="settings">
@@ -114,7 +118,8 @@
         </div>
 
         <div class="field">
-          <span class="label">Защита</span>
+          <span class="label">Подключение и защита</span>
+          <label class="check"><input type="checkbox" id="auto-switch"> <span>Автозамена: если сервер перестал отвечать, переключаться на следующий</span></label>
           <label class="check"><input type="checkbox" id="webrtc-protect"> <span>Защита от утечки IP через WebRTC</span></label>
           <label class="check"><input type="checkbox" id="kill-switch"> <span>Kill switch: при обрыве VPN не открывать сайты напрямую</span></label>
         </div>
@@ -122,6 +127,8 @@
         <div class="field">
           <span class="label">Список узлов</span>
           <label class="check"><input type="checkbox" id="sort-by-ping"> <span>Сортировать по пингу после замера</span></label>
+          <label class="check"><input type="checkbox" id="hide-dead"> <span>Скрывать серверы, которые не ответили на замер</span></label>
+          <label class="check"><input type="checkbox" id="quick-ping"> <span>Обновлять пинг лучших серверов при открытии</span></label>
           <label class="check"><input type="checkbox" id="show-unsupported"> <span>Показывать неподдерживаемые узлы</span></label>
         </div>
 
@@ -143,6 +150,8 @@
         <div class="field">
           <span class="label">Помощник</span>
           <div class="helper-box" id="helper-box">Проверяю…</div>
+          <button class="btn small" id="copy-report" type="button">Скопировать отчёт для поддержки</button>
+          <span class="hint">В отчёте версии, настройки и журнал помощника. Ключей и ссылок на подписки в нём нет.</span>
         </div>
 
         <button class="btn primary wide" id="save-settings">Сохранить</button>
