@@ -242,6 +242,43 @@ func withStatsAPI(config []byte) ([]byte, int, string) {
 	return out, port, secret
 }
 
+// withXrayStats включает в конфиге xray счётчики трафика и HTTP-страницу метрик на свободном
+// локальном порту: по ней помощник считает скорость. Конфиг без изменений, если метрики уже заданы.
+func withXrayStats(config []byte) ([]byte, int) {
+	var cfg map[string]any
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		return config, 0
+	}
+	if _, ok := cfg["metrics"]; ok {
+		return config, 0
+	}
+	port, err := freePort()
+	if err != nil {
+		return config, 0
+	}
+	if _, ok := cfg["stats"]; !ok {
+		cfg["stats"] = map[string]any{}
+	}
+	policy, _ := cfg["policy"].(map[string]any)
+	if policy == nil {
+		policy = map[string]any{}
+	}
+	system, _ := policy["system"].(map[string]any)
+	if system == nil {
+		system = map[string]any{}
+	}
+	system["statsOutboundUplink"] = true
+	system["statsOutboundDownlink"] = true
+	policy["system"] = system
+	cfg["policy"] = policy
+	cfg["metrics"] = map[string]any{"tag": "metrics", "listen": fmt.Sprintf("127.0.0.1:%d", port)}
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		return config, 0
+	}
+	return out, port
+}
+
 var startMu sync.Mutex
 
 func (c *coreProcess) start(kind, path string, config []byte, port int) error {
@@ -259,6 +296,8 @@ func (c *coreProcess) start(kind, path string, config []byte, port int) error {
 	statsPort, statsSecret := 0, ""
 	if kind == coreSingBox {
 		config, statsPort, statsSecret = withStatsAPI(config)
+	} else {
+		config, statsPort = withXrayStats(config)
 	}
 
 	cfgPath := filepath.Join(dataDir, "config.json")
@@ -345,16 +384,19 @@ func (c *coreProcess) stop() {
 }
 
 // stats возвращает, сколько байт прошло через ядро с момента запуска.
-// ok=false, если ядро не запущено или не умеет отдавать статистику (xray).
+// ok=false, если ядро не запущено или статистика недоступна.
 func (c *coreProcess) stats() (down, up int64, ok bool) {
 	if !c.running() {
 		return 0, 0, false
 	}
 	c.mu.Lock()
-	port, secret := c.statsPort, c.statsSecret
+	port, secret, kind := c.statsPort, c.statsSecret, c.kind
 	c.mu.Unlock()
 	if port == 0 {
 		return 0, 0, false
+	}
+	if kind == coreXray {
+		return xrayStats(port)
 	}
 	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/connections", port), nil)
 	req.Header.Set("Authorization", "Bearer "+secret)
@@ -372,6 +414,32 @@ func (c *coreProcess) stats() (down, up int64, ok bool) {
 		return 0, 0, false
 	}
 	return body.DownloadTotal, body.UploadTotal, true
+}
+
+// xrayStats читает счётчики выхода "proxy" со страницы метрик xray.
+func xrayStats(port int) (down, up int64, ok bool) {
+	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/debug/vars", port))
+	if err != nil {
+		return 0, 0, false
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Stats struct {
+			Outbound map[string]struct {
+				Downlink int64 `json:"downlink"`
+				Uplink   int64 `json:"uplink"`
+			} `json:"outbound"`
+		} `json:"stats"`
+	}
+	if resp.StatusCode != 200 || json.NewDecoder(resp.Body).Decode(&body) != nil {
+		return 0, 0, false
+	}
+	p, found := body.Stats.Outbound["proxy"]
+	if !found {
+		return 0, 0, false
+	}
+	return p.Downlink, p.Uplink, true
 }
 
 func firstNonEmpty(vals ...string) string {

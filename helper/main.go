@@ -17,7 +17,7 @@ import (
 )
 
 // version можно переопределить при сборке: -ldflags "-X main.version=1.2.3".
-var version = "1.1.0"
+var version = "1.2.0"
 
 type request struct {
 	ID        int             `json:"id"`
@@ -30,6 +30,7 @@ type request struct {
 	UserAgent string          `json:"userAgent"`
 	Stream    bool            `json:"stream"`
 	Core      string          `json:"core"`
+	Direct    bool            `json:"direct"`
 }
 
 type testNode struct {
@@ -93,7 +94,7 @@ func handle(req request) {
 	switch req.Cmd {
 	case "hello":
 		// features: что умеет этот помощник; расширение по ним решает, какие функции включать.
-		info := map[string]any{"version": version, "features": []string{"fetch", "stream", "xray", "stats", "update"}}
+		info := map[string]any{"version": version, "features": []string{"fetch", "stream", "xray", "stats", "update", "xraystats", "probe", "diag"}}
 		if path, err := findCore(); err != nil {
 			info["coreError"] = err.Error()
 		} else {
@@ -125,6 +126,18 @@ func handle(req request) {
 	case "stats":
 		down, up, ok := core.stats()
 		reply(req.ID, map[string]any{"available": ok, "down": down, "up": up})
+
+	case "probe":
+		// Проверка, отвечает ли интернет: через работающее ядро или напрямую (direct).
+		ms, err := probe(req.URL, req.TimeoutMs, req.Direct)
+		if err != nil {
+			fail(req.ID, err)
+			return
+		}
+		reply(req.ID, map[string]any{"ms": ms})
+
+	case "diag":
+		reply(req.ID, diagnostics())
 
 	case "update":
 		res, err := selfUpdate()
