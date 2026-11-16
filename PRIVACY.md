@@ -1,6 +1,6 @@
 # Политика конфиденциальности M-Link
 
-_Обновлено: 14 ноября 2026 г._ · [English version below](#m-link-privacy-policy)
+_Обновлено: 16 ноября 2026 г._ · [English version below](#m-link-privacy-policy)
 
 M-Link — это расширение для браузера и программа-помощник, которые подключают браузер к прокси-серверам пользователя. Мы не собираем и не получаем никаких данных пользователей.
 
@@ -23,7 +23,8 @@ M-Link — это расширение для браузера и програм
 - **Скачивание подписок** по ссылкам, которые добавил ты сам, у твоего поставщика подписки. Запрос выполняет помощник и передаёт заголовок `User-Agent: M-Link/<версия>`. Самому расширению доступ к сайтам не нужен.
 - **Служебный файл с GitHub** раз в сутки: `remote-config.json` из репозитория проекта. В нём номер актуальной версии помощника и текст рекламного блока. Запрос не содержит никаких данных о тебе, но GitHub, как любой сайт, видит IP-адрес.
 - **Трафик браузера** идёт через выбранный тобой сервер, а при режиме «все, кроме списка» или «только список» — напрямую для указанных сайтов. Что видит и хранит сервер, определяет его владелец, а не M-Link.
-- **Замер пинга:** запрос к `https://www.gstatic.com/generate_204` через каждый проверяемый сервер.
+- **Замер пинга:** запрос к `https://www.gstatic.com/generate_204` через каждый проверяемый сервер. Тот же запрос раз в минуту идёт через подключённый сервер, чтобы заметить, что он перестал отвечать (автозамену можно выключить в настройках).
+- **Отчёт для поддержки** составляется только по нажатию кнопки в настройках и попадает в буфер обмена. Сам он никуда не отправляется. В нём версии, настройки и журнал помощника; ссылки на подписки, ключи и адреса серверов из него вырезаются.
 - **Обновление помощника:** помощник версии 1.1 и новее раз в сутки (и когда ты нажимаешь «Обновить») узнаёт у `api.github.com` номер последнего релиза этого проекта и, если он новее, скачивает архив с `github.com`. Запрос не содержит данных о тебе.
 - **Ссылки «Скачать помощник», «Продлить» и рекламный блок** открывают GitHub, сайт или Telegram-бот сервиса только по твоему нажатию.
 
@@ -49,7 +50,7 @@ M-Link — это расширение для браузера и програм
 
 # M-Link Privacy Policy
 
-_Last updated: November 14, 2026_
+_Last updated: November 16, 2026_
 
 M-Link is a browser extension and a companion helper app that connect the browser to the user's own proxy servers. We do not collect or receive any user data.
 
@@ -72,7 +73,8 @@ Neither the extension nor the helper sends **anything** to the developer: no bro
 - **Subscription download** from the links the user added, sent to the user's subscription provider. The request is made by the helper app with the header `User-Agent: M-Link/<version>`. The extension itself has no access to websites.
 - **A config file from GitHub** once a day: `remote-config.json` from the project repository. It contains the current helper version and the text of the promo block. The request carries no user data, but GitHub, like any website, sees the IP address.
 - **Browser traffic** goes through the server selected by the user, or directly for sites excluded by the user's rules. What a server sees or logs is determined by its operator, not by M-Link.
-- **Latency test:** a request to `https://www.gstatic.com/generate_204` through each server being tested.
+- **Latency test:** a request to `https://www.gstatic.com/generate_204` through each server being tested. The same request is made once a minute through the connected server to notice when it stops responding (auto-switch can be turned off in settings).
+- **Support report** is created only when the user clicks the button in settings and is copied to the clipboard. It is not sent anywhere. It contains versions, settings and the helper log; subscription links, keys and server addresses are stripped from it.
 - **Helper updates:** helper 1.1 and later asks `api.github.com` once a day (and when the user clicks "Update") for the latest release of this project and, if it is newer, downloads the archive from `github.com`. The request carries no user data.
 - **"Download helper", "Renew" and promo links** open GitHub, the service's site or Telegram only when the user clicks them.
 

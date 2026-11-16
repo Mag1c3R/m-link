@@ -1,6 +1,6 @@
 # Тексты для карточки в Chrome Web Store
 
-Версия расширения 1.1.0. Всё ниже копируется в кабинет разработчика как есть.
+Версия расширения 1.2.0. Всё ниже копируется в кабинет разработчика как есть.
 
 Версия 1.0 была отклонена за «злоупотребление ключевыми словами» (Yellow Argon): магазин считает перечни протоколов и названия чужих программ набором ключевых слов. Поэтому в описаниях протоколы упоминаются только в обычных предложениях, а полный список — на GitHub. Не добавляй их обратно списком.
 
@@ -28,6 +28,7 @@ M-Link подключает браузер к твоей VPN-подписке. �
 • Показывает текущую скорость загрузки и отдачи.
 • Можно выбрать, какие сайты открывать через VPN: все, все кроме российских или только нужные. Для открытого сайта — одним переключателем прямо в окне расширения.
 • Защищает от утечки настоящего IP через WebRTC.
+• Если сервер перестал отвечать, само переключается на следующий.
 • По желанию не пускает сайты мимо VPN, если соединение оборвалось, и само переподключается.
 • Напоминает за 3 дня до конца подписки.
 • Русский и английский интерфейс, светлая и тёмная тема.
@@ -71,6 +72,7 @@ WHAT IT DOES
 • Shows the current download and upload speed.
 • Choose which sites go through the VPN: all of them, all except local ones, or only selected sites. For the open site, use the switch right in the extension window.
 • Protects your real IP from leaking through WebRTC.
+• Switches to the next server automatically if the current one stops responding.
 • Optionally blocks sites from opening outside the VPN if the connection drops, and reconnects automatically.
 • Reminds you 3 days before the subscription ends.
 • English and Russian interface, light and dark theme.
@@ -138,7 +140,7 @@ M-Link connects the browser to the user's own proxy servers. The user adds a sub
   ```
 - `alarms`:
   ```
-  Periodically refreshes the user's subscriptions (as often as the subscription provider asks, at most every 12 hours by default), checks once a day whether a newer helper version is available, and retries the connection when the optional kill switch is on.
+  Periodically refreshes the user's subscriptions (as often as the subscription provider asks, at most every 12 hours by default), checks once a day whether a newer helper version is available, checks once a minute that the connected server still responds, and retries the connection when the optional kill switch is on.
   ```
 
 **Удалённый код:** «Нет, я не использую удалённый код». Расширение раз в сутки читает с GitHub файл `remote-config.json`, но это данные (номер версии помощника и текст рекламного блока), а не код.
