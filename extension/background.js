@@ -1100,6 +1100,40 @@ async function diagReport() {
   return { text: redact(lines.join('\n')) };
 }
 
+// ---------- обновления расширения ----------
+
+const EXT_VERSION = chrome.runtime.getManifest().version;
+
+// Chrome скачал новую версию расширения и ждёт перезапуска: запоминаем её для уведомления в popup.
+chrome.runtime.onUpdateAvailable?.addListener((d) => {
+  chrome.storage.local.set({ extUpdate: { version: d.version, at: Date.now() } });
+});
+
+// Кнопка «Проверить обновления»: спрашивает Chrome о новой версии расширения
+// и GitHub — о новой версии помощника.
+async function checkUpdates() {
+  let ext = 'unsupported';
+  let extVersion = null;
+  try {
+    const r = await chrome.runtime.requestUpdateCheck();
+    ext = r?.status || 'no_update';
+    extVersion = r?.version || null;
+    if (ext === 'update_available' && extVersion) {
+      await chrome.storage.local.set({ extUpdate: { version: extVersion, at: Date.now() } });
+    }
+  } catch {
+    // Распакованное расширение или нет связи с магазином — проверяем только помощник.
+  }
+  await refreshRemote(true);
+  const h = await helperInfo();
+  return {
+    ext,
+    extVersion,
+    current: EXT_VERSION,
+    helper: h.installed ? { current: h.version, latest: h.latest, updateAvailable: !!h.updateAvailable } : null,
+  };
+}
+
 // ---------- удалённый конфиг: версия помощника и рекламный блок ----------
 
 async function refreshRemote(force = false) {
@@ -1153,6 +1187,7 @@ const handlers = {
   // Popup открыли: обновляем пинг лучших серверов, не задерживая ответ.
   quickTest: () => { quickTest().catch(() => {}); return {}; },
   diag: () => diagReport(),
+  checkUpdates: () => checkUpdates(),
   device: async () => {
     const c = caps; // если помощник уже опрашивали, знаем, умеет ли он передавать заголовки
     return { hwid: await getHwid(), ...(await deviceInfo()), helperSupports: c ? c.features.has('headers') : null };
@@ -1206,5 +1241,8 @@ chrome.runtime.onStartup.addListener(() => {});
     await clearWebRTC();
   }
   if (!(await chrome.alarms.get('update-subs'))) await scheduleAlarms();
+  // Обновление уже установлено — уведомление больше не нужно.
+  const { extUpdate } = await chrome.storage.local.get({ extUpdate: null });
+  if (extUpdate && compareVersions(extUpdate.version, EXT_VERSION) <= 0) await chrome.storage.local.remove('extUpdate');
   refreshRemote().then(() => maybeAutoUpdate()).catch(() => {});
 })();

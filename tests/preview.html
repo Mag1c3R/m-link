@@ -44,7 +44,7 @@ if (q.get('demo')) {
     manual: [], selectedId: nodes[0].id, latency,
     settings: {
       mode: 'except', exceptList: en ? 'mybank.com\nlocal-news.com\nmail.example.org' : 'ru\nрф\nsu\nby', onlyList: '', port: 10808, updateHours: 12,
-      userAgent: 'M-Link/1.2.0', webrtcProtect: true, killSwitch: false, lang: 'auto', siteRules: {},
+      userAgent: 'M-Link/1.4.0', webrtcProtect: true, killSwitch: false, lang: 'auto', siteRules: {},
     },
   };
   connectedName = nodes[0].name;
@@ -66,6 +66,7 @@ if (q.get('demo')) {
   };
   connectedName = sub[0].name;
 }
+if (q.get('extupdate')) local.extUpdate = { version: '1.5.0', at: Date.now() };
 const st = q.get('state') || 'off';
 const session = { status: st === 'on' ? { state: 'on', nodeName: connectedName, since: Date.now() - 754e3 }
   : st === 'error' ? { state: 'error', code: 'no_helper', error: 'Помощник не установлен. Он нужен, чтобы работали VLESS, Hysteria2 и другие протоколы.' }
@@ -86,9 +87,10 @@ window.chrome = {
   tabs: { query: async () => [{ url: q.get('tab') || 'https://www.youtube.com/watch?v=1' }] },
   i18n: { getUILanguage: () => q.get('ui') || 'ru' },
   runtime: {
-    getManifest: () => ({ version: '1.2.0' }),
+    getManifest: () => ({ version: '1.4.0' }),
     getPlatformInfo: async () => ({ os: q.get('os') || 'mac', arch: 'arm64' }),
     sendMessage: async (m) => (m.type === 'stats' ? fakeStats()
+      : m.type === 'checkUpdates' ? { ok: true, ext: q.get('extupdate') ? 'update_available' : 'no_update', extVersion: q.get('extupdate') ? '1.5.0' : null, helper: { current: '1.3.0', latest: '1.3.0', updateAvailable: false } }
       : m.type === 'helperInfo' ? (q.get('nohelper') ? noHelper : helperOk)
       : q.get('nohelper') && ['test', 'connect', 'add', 'updateAll'].includes(m.type)
         ? { ok: false, code: 'no_helper', error: 'Помощник не установлен.' }

@@ -15,9 +15,12 @@
           <img src="icons/32.png" alt="" width="22" height="22">
           <span id="brand-name">M-Link</span>
         </div>
+        <div class="top-actions">
+        <button class="icon-btn theme-btn" id="theme-btn" type="button" title="Тема: как в системе" aria-label="Тема: как в системе"></button>
         <button class="icon-btn" id="open-settings" title="Настройки" aria-label="Настройки">
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
         </button>
+        </div>
       </header>
 
       <div class="hero" id="hero">
@@ -33,6 +36,7 @@
       </div>
 
       <div class="banner" id="banner" hidden></div>
+      <div class="ext-update" id="ext-update" hidden></div>
       <div class="setup" id="setup" hidden></div>
       <div class="site" id="site" hidden></div>
       <div class="reminder" id="reminder" hidden></div>
@@ -72,10 +76,10 @@
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6"/></svg>
         </button>
         <div class="brand"><span>Настройки</span></div>
-        <div class="theme-switch" id="theme-switch" role="group" aria-label="Тема">
-          <button type="button" class="t-auto" id="theme-auto" title="Тема как в системе">Авто</button>
-          <button type="button" class="t-icon" id="theme-icon" title="Светлая или тёмная тема" aria-label="Светлая или тёмная тема"></button>
-        </div>
+        <button class="upd-btn" id="check-updates" type="button" aria-label="Проверить обновления">
+          <svg viewBox="0 0 24 24" width="17" height="17"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>
+          <span class="lbl">Проверить обновления</span>
+        </button>
       </header>
 
       <div class="settings">

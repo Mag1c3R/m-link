@@ -1,4 +1,4 @@
-import { BRAND, sanitizePromo } from './config.js';
+import { BRAND, sanitizePromo, compareVersions } from './config.js';
 import { t, setLang, detectLang, getLang, translateDom } from './lib/i18n.js';
 import { routeForHost, siteDomain, normalizeDomains, normalizeRules } from './lib/singbox.js';
 
@@ -606,6 +606,7 @@ function render() {
   clearTimeout(listTimer);
   listTimer = null;
   renderHero();
+  renderExtUpdate();
   renderSetup();
   renderSite();
   renderReminder();
@@ -737,46 +738,82 @@ function closeSettings() {
   $('view-main').hidden = false;
 }
 
-// ---------- тема: авто / светлая / тёмная ----------
+// ---------- тема: авто → светлая → тёмная ----------
 
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const THEME_ORDER = ['auto', 'light', 'dark'];
 const THEME_ICON = {
-  light: '<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="4" fill="currentColor"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
+  auto: '<span class="t-a">A</span>',
+  light: '<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="4" fill="currentColor"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
   dark: '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/></svg>',
 };
 
 function themePref() {
   const v = readStored('theme', 'auto');
-  return v === 'light' || v === 'dark' ? v : 'auto';
-}
-
-// Тема, которая сейчас на экране: выбранная вручную или системная.
-function shownTheme() {
-  const pref = themePref();
-  return pref === 'auto' ? (darkQuery.matches ? 'dark' : 'light') : pref;
+  return THEME_ORDER.includes(v) ? v : 'auto';
 }
 
 function applyTheme() {
   const pref = themePref();
   if (pref === 'auto') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = pref;
-  $('theme-auto').classList.toggle('off', pref !== 'auto');
-  $('theme-auto').setAttribute('aria-pressed', String(pref === 'auto'));
-  const icon = $('theme-icon');
-  icon.innerHTML = THEME_ICON[shownTheme()];
-  icon.classList.toggle('off', pref === 'auto');
+  const btn = $('theme-btn');
+  btn.innerHTML = THEME_ICON[pref];
+  const label = { auto: t('Тема: как в системе'), light: t('Тема: светлая'), dark: t('Тема: тёмная') }[pref];
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
 }
 
-function setTheme(pref) {
-  writeStored('theme', pref);
+// Одно нажатие — следующая тема по кругу: авто → светлая → тёмная → авто.
+$('theme-btn').addEventListener('click', () => {
+  writeStored('theme', THEME_ORDER[(THEME_ORDER.indexOf(themePref()) + 1) % THEME_ORDER.length]);
   applyTheme();
+});
+darkQuery.addEventListener('change', applyTheme);
+
+// ---------- обновления ----------
+
+// Уведомление о новой версии расширения на главной. Закрытое не показываем, пока не выйдет следующая.
+function renderExtUpdate() {
+  const box = $('ext-update');
+  const u = state?.extUpdate;
+  if (!u?.version || compareVersions(u.version, VERSION) <= 0 || readStored('dismissedExt', '') === u.version) {
+    box.hidden = true;
+    return;
+  }
+  box.innerHTML = `<span class="txt">${t('Доступна новая версия {0}', esc(BRAND.name + ' ' + u.version))}</span>
+    <button class="btn primary small" data-ext-reload>${t('Обновить')}</button>
+    <button class="icon-btn" data-ext-dismiss title="${t('Скрыть')}" aria-label="${t('Скрыть')}">${ICON.x}</button>`;
+  box.hidden = false;
 }
 
-// «Авто» включает системную тему; повторное нажатие закрепляет ту, что сейчас на экране.
-$('theme-auto').addEventListener('click', () => setTheme(themePref() === 'auto' ? shownTheme() : 'auto'));
-// Значок переключает светлую и тёмную тему вручную.
-$('theme-icon').addEventListener('click', () => setTheme(shownTheme() === 'dark' ? 'light' : 'dark'));
-darkQuery.addEventListener('change', applyTheme);
+$('ext-update').addEventListener('click', (e) => {
+  if (e.target.closest('[data-ext-reload]')) {
+    // Chrome уже скачал новую версию: перезапуск расширения её применяет.
+    chrome.runtime.reload();
+  } else if (e.target.closest('[data-ext-dismiss]')) {
+    writeStored('dismissedExt', state.extUpdate.version);
+    renderExtUpdate();
+  }
+});
+
+$('check-updates').addEventListener('click', (e) => busy(e.currentTarget, async () => {
+  const r = await send('checkUpdates');
+  // Проверка вручную снова показывает уведомления, которые раньше закрыли.
+  try { localStorage.removeItem('dismissedExt'); localStorage.removeItem('dismissedHelper'); } catch { /* ничего */ }
+  await checkHelper();
+  renderExtUpdate();
+  const found = [];
+  if (r.ext === 'update_available') found.push(`${BRAND.name} ${r.extVersion}`);
+  if (r.helper?.updateAvailable) found.push(t('помощник {0}', r.helper.latest));
+  if (found.length) {
+    toast(t('Доступна новая версия: {0}. Уведомление на главном экране.', found.join(', ')), false, 5000);
+  } else if (r.ext === 'throttled') {
+    toast(t('Помощник последней версии. Расширение Chrome разрешает проверять не так часто, попробуй позже.'), false, 5000);
+  } else {
+    toast(t('У тебя последние версии расширения и помощника'));
+  }
+}));
 
 // ---------- события ----------
 
@@ -1016,7 +1053,7 @@ function withDefaults(settings) {
 // Полная загрузка — один раз при открытии. Дальше состояние обновляется по событиям хранилища.
 async function load() {
   const local = await chrome.storage.local.get({
-    subs: [], manual: [], selectedId: null, latency: {}, settings: {}, remote: null, helperUpdate: null,
+    subs: [], manual: [], selectedId: null, latency: {}, settings: {}, remote: null, helperUpdate: null, extUpdate: null,
   });
   const session = await chrome.storage.session.get({ status: { state: 'off' }, testing: null, notice: null });
   state = { ...local, settings: withDefaults(local.settings) };
@@ -1095,6 +1132,9 @@ function applyChanges(changes, area) {
     } else if (key === 'subs' || key === 'manual') {
       state[key] = v || [];
       full = true;
+    } else if (key === 'extUpdate') {
+      state.extUpdate = v || null;
+      renderExtUpdate();
     } else if (key === 'remote') {
       state.remote = v || null;
       full = true;

@@ -208,13 +208,18 @@ export default {
   "Скопировать отчёт для поддержки": "Copy report for support",
   "В отчёте версии, настройки и журнал помощника. Ключей и ссылок на подписки в нём нет.": "The report has versions, settings and the helper log. It contains no keys or subscription links.",
   "Авто": "Auto",
-  "Тема": "Theme",
-  "Тема как в системе": "Same theme as the system",
-  "Светлая или тёмная тема": "Light or dark theme",
   "Идентификатор устройства (HWID)": "Device ID (HWID)",
   "Скопировать": "Copy",
   "Передавать HWID и систему панели подписки": "Send the HWID and system to the subscription panel",
   "По нему сервис видит это расширение как отдельное устройство. Назови его поддержке, если нужно сбросить устройство.": "The service sees this extension as a separate device by it. Tell it to support if the device needs to be reset.",
   "Чтобы панель получала HWID, обнови помощник.": "Update the helper so the panel receives the HWID.",
-  "HWID скопирован": "HWID copied"
+  "HWID скопирован": "HWID copied",
+  "Тема: как в системе": "Theme: same as system",
+  "Тема: светлая": "Theme: light",
+  "Тема: тёмная": "Theme: dark",
+  "Проверить обновления": "Check for updates",
+  "Доступна новая версия {0}": "{0} is available",
+  "Доступна новая версия: {0}. Уведомление на главном экране.": "New version available: {0}. See the notice on the main screen.",
+  "Помощник последней версии. Расширение Chrome разрешает проверять не так часто, попробуй позже.": "The helper is up to date. Chrome limits how often the extension can be checked, try again later.",
+  "У тебя последние версии расширения и помощника": "You have the latest extension and helper"
 };
