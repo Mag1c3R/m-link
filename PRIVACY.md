@@ -26,7 +26,8 @@ M-Link — это расширение для браузера и програм
 - **Трафик браузера** идёт через выбранный тобой сервер, а при режиме «все, кроме списка» или «только список» — напрямую для указанных сайтов. Что видит и хранит сервер, определяет его владелец, а не M-Link.
 - **Замер пинга:** запрос к `https://www.gstatic.com/generate_204` через каждый проверяемый сервер. Тот же запрос раз в минуту идёт через подключённый сервер, чтобы заметить, что он перестал отвечать (автозамену можно выключить в настройках).
 - **Отчёт для поддержки** составляется только по нажатию кнопки в настройках и попадает в буфер обмена. Сам он никуда не отправляется. В нём версии, настройки и журнал помощника; ссылки на подписки, ключи и адреса серверов из него вырезаются.
-- **Обновление помощника:** помощник версии 1.1 и новее раз в сутки (и когда ты нажимаешь «Обновить») узнаёт у `api.github.com` номер последнего релиза этого проекта и, если он новее, скачивает архив с `github.com`. Запрос не содержит данных о тебе.
+- **Обновление помощника:** помощник версии 1.1 и новее раз в сутки (и когда ты нажимаешь «Обновить» или «Проверить обновления») узнаёт у `api.github.com` номер последнего релиза этого проекта и, если он новее, скачивает архив с `github.com`. Запрос не содержит данных о тебе.
+- **Обновление расширения** проверяет сам Chrome через Интернет-магазин Chrome, как для любого расширения. Кнопка «Проверить обновления» просто просит его сделать это сейчас.
 - **Ссылки «Скачать помощник», «Продлить» и рекламный блок** открывают GitHub, сайт или Telegram-бот сервиса только по твоему нажатию.
 
 ## Третьи стороны
@@ -77,7 +78,8 @@ Neither the extension nor the helper sends **anything** to the developer: no bro
 - **Browser traffic** goes through the server selected by the user, or directly for sites excluded by the user's rules. What a server sees or logs is determined by its operator, not by M-Link.
 - **Latency test:** a request to `https://www.gstatic.com/generate_204` through each server being tested. The same request is made once a minute through the connected server to notice when it stops responding (auto-switch can be turned off in settings).
 - **Support report** is created only when the user clicks the button in settings and is copied to the clipboard. It is not sent anywhere. It contains versions, settings and the helper log; subscription links, keys and server addresses are stripped from it.
-- **Helper updates:** helper 1.1 and later asks `api.github.com` once a day (and when the user clicks "Update") for the latest release of this project and, if it is newer, downloads the archive from `github.com`. The request carries no user data.
+- **Helper updates:** helper 1.1 and later asks `api.github.com` once a day (and when the user clicks "Update" or "Check for updates") for the latest release of this project and, if it is newer, downloads the archive from `github.com`. The request carries no user data.
+- **Extension updates** are checked by Chrome itself through the Chrome Web Store, as for any extension. The "Check for updates" button just asks Chrome to do it now.
 - **"Download helper", "Renew" and promo links** open GitHub, the service's site or Telegram only when the user clicks them.
 
 ## Third parties
