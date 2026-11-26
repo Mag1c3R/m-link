@@ -17,20 +17,21 @@ import (
 )
 
 // version можно переопределить при сборке: -ldflags "-X main.version=1.2.3".
-var version = "1.2.0"
+var version = "1.3.0"
 
 type request struct {
-	ID        int             `json:"id"`
-	Cmd       string          `json:"cmd"`
-	Config    json.RawMessage `json:"config"`
-	Port      int             `json:"port"`
-	Nodes     []testNode      `json:"nodes"`
-	URL       string          `json:"url"`
-	TimeoutMs int             `json:"timeoutMs"`
-	UserAgent string          `json:"userAgent"`
-	Stream    bool            `json:"stream"`
-	Core      string          `json:"core"`
-	Direct    bool            `json:"direct"`
+	ID        int               `json:"id"`
+	Cmd       string            `json:"cmd"`
+	Config    json.RawMessage   `json:"config"`
+	Port      int               `json:"port"`
+	Nodes     []testNode        `json:"nodes"`
+	URL       string            `json:"url"`
+	TimeoutMs int               `json:"timeoutMs"`
+	UserAgent string            `json:"userAgent"`
+	Headers   map[string]string `json:"headers"`
+	Stream    bool              `json:"stream"`
+	Core      string            `json:"core"`
+	Direct    bool              `json:"direct"`
 }
 
 type testNode struct {
@@ -94,7 +95,7 @@ func handle(req request) {
 	switch req.Cmd {
 	case "hello":
 		// features: что умеет этот помощник; расширение по ним решает, какие функции включать.
-		info := map[string]any{"version": version, "features": []string{"fetch", "stream", "xray", "stats", "update", "xraystats", "probe", "diag"}}
+		info := map[string]any{"version": version, "features": []string{"fetch", "stream", "xray", "stats", "update", "xraystats", "probe", "diag", "headers"}}
 		if path, err := findCore(); err != nil {
 			info["coreError"] = err.Error()
 		} else {
@@ -167,7 +168,7 @@ func handle(req request) {
 		reply(req.ID, map[string]any{"results": results, "method": method})
 
 	case "fetch":
-		res, err := fetchURL(req.URL, req.UserAgent)
+		res, err := fetchURL(req.URL, req.UserAgent, req.Headers)
 		if err != nil {
 			fail(req.ID, err)
 			return

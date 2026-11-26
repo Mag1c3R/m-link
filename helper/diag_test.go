@@ -22,3 +22,14 @@ uuid 11111111-2222-3333-4444-555555555555 key SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed
 		}
 	}
 }
+
+// Помощник передаёт панели только заголовки устройства и только безопасные значения.
+func TestCleanHeaders(t *testing.T) {
+	got := cleanHeaders(map[string]string{
+		"X-HWID": "loqn1oc2u5qbvfr7", "x-device-os": "macOS", "Host": "evil.example", "Cookie": "a=b",
+		"x-ver-os": "15\r\nX-Injected: 1", "x-device-model": "",
+	})
+	if len(got) != 2 || got["x-hwid"] != "loqn1oc2u5qbvfr7" || got["x-device-os"] != "macOS" {
+		t.Errorf("неожиданные заголовки: %v", got)
+	}
+}

@@ -34,7 +34,34 @@ type fetchResult struct {
 	via     string
 }
 
-func doFetch(rawURL, ua string, proxyPort int) (*fetchResult, error) {
+// Заголовки устройства, которые расширение может передать панели вместе с запросом подписки
+// (так делают Happ и другие клиенты: по ним панель считает устройства и применяет их лимит).
+// Другие заголовки не пропускаем, чтобы расширение не могло подменить, например, Host или Cookie.
+var allowedHeaders = map[string]bool{"x-hwid": true, "x-device-os": true, "x-ver-os": true, "x-device-model": true}
+
+func cleanHeaders(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range in {
+		k = strings.ToLower(strings.TrimSpace(k))
+		v = strings.TrimSpace(v)
+		if !allowedHeaders[k] || v == "" || len(v) > 128 {
+			continue
+		}
+		ok := true
+		for _, r := range v {
+			if r < 0x20 || r > 0x7e {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func doFetch(rawURL, ua string, extra map[string]string, proxyPort int) (*fetchResult, error) {
 	tr := &http.Transport{Proxy: nil, ResponseHeaderTimeout: 15 * time.Second}
 	via := "direct"
 	if proxyPort > 0 {
@@ -52,6 +79,9 @@ func doFetch(rawURL, ua string, proxyPort int) (*fetchResult, error) {
 		req.Header.Set("User-Agent", ua)
 	}
 	req.Header.Set("Accept", "*/*")
+	for k, v := range extra {
+		req.Header.Set(k, v)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -84,14 +114,15 @@ func doFetch(rawURL, ua string, proxyPort int) (*fetchResult, error) {
 // fetchURL скачивает подписку. Если ядро запущено, сначала пробует через него
 // (сервер подписки может быть недоступен напрямую). Если за 2 секунды ответа нет
 // или он неудачный, параллельно пробует напрямую и берёт первый успешный ответ.
-func fetchURL(rawURL, ua string) (*fetchResult, error) {
+func fetchURL(rawURL, ua string, headers map[string]string) (*fetchResult, error) {
+	extra := cleanHeaders(headers)
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("ссылка должна начинаться с http:// или https://")
 	}
 	proxyPort := core.proxyPort()
 	if proxyPort == 0 {
-		res, err := doFetch(u.String(), ua, 0)
+		res, err := doFetch(u.String(), ua, extra, 0)
 		if err != nil {
 			return nil, friendlyNetError(err)
 		}
@@ -105,7 +136,7 @@ func fetchURL(rawURL, ua string) (*fetchResult, error) {
 	results := make(chan attempt, 2)
 	run := func(port int) {
 		go func() {
-			res, err := doFetch(u.String(), ua, port)
+			res, err := doFetch(u.String(), ua, extra, port)
 			if err != nil {
 				log.Printf("fetch failed (proxy port %d): %v", port, err)
 			}
