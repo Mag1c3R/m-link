@@ -1,6 +1,6 @@
 # Политика конфиденциальности M-Link
 
-_Обновлено: 26 ноября 2026 г._ · [English version below](#m-link-privacy-policy)
+_Обновлено: 27 ноября 2026 г._ · [English version below](#m-link-privacy-policy)
 
 M-Link — это расширение для браузера и программа-помощник, которые подключают браузер к прокси-серверам пользователя. Мы не собираем и не получаем никаких данных пользователей.
 
@@ -38,7 +38,7 @@ M-Link — это расширение для браузера и програм
 
 - Удали подписку в расширении: она стирается вместе со списком серверов.
 - Удали расширение из браузера: браузер стирает все его данные.
-- Запусти `uninstall.sh` или `uninstall.bat` из архива помощника: удаляются помощник, его журнал и конфиг.
+- Удали помощник: на Windows через «Параметры» → «Приложения» (M-Link Helper), на macOS и Linux командой удаления из README или `uninstall.sh` из архива. Удаляются помощник, его журнал и конфиг.
 
 ## Открытый исходный код
 
@@ -52,7 +52,7 @@ M-Link — это расширение для браузера и програм
 
 # M-Link Privacy Policy
 
-_Last updated: November 26, 2026_
+_Last updated: November 27, 2026_
 
 M-Link is a browser extension and a companion helper app that connect the browser to the user's own proxy servers. We do not collect or receive any user data.
 
@@ -90,7 +90,7 @@ Data is not sold or shared with third parties. Third-party services receive requ
 
 - Remove a subscription in the extension: its server list is deleted too.
 - Uninstall the extension: the browser deletes all of its data.
-- Run `uninstall.sh` or `uninstall.bat` from the helper archive: the helper, its log and config are removed.
+- Remove the helper: on Windows via Settings → Apps (M-Link Helper), on macOS and Linux with the uninstall command from the README or `uninstall.sh` from the archive. The helper, its log and config are removed.
 
 ## Open source
 

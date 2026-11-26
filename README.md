@@ -16,29 +16,38 @@ Chrome умеет отдавать трафик только в HTTP/SOCKS-пр�
 
 Помощник нужен для подключения, замера пинга и скачивания подписок. VLESS, Reality, VMess, Trojan, Shadowsocks, Hysteria2 и TUIC браузер сам не поддерживает. Ядра sing-box и xray-core уже входят в комплект. Начиная с версии 1.1 помощник обновляется сам.
 
-**macOS и Linux.** Открой «Терминал», вставь команду и нажми Enter:
+**macOS.** Скачай установщик и открой его: [Apple Silicon (M1–M4)](../../releases/latest/download/M-Link-Helper-macOS-arm64.pkg) или [Intel](../../releases/latest/download/M-Link-Helper-macOS-intel.pkg). Установщик попросит пароль администратора, но сам помощник ставится в папку пользователя (`~/Library/Application Support/MLink`), поэтому дальше обновляется без пароля.
+
+**Windows.** Скачай [M-Link-Helper-Setup.exe](../../releases/latest/download/M-Link-Helper-Setup.exe) и запусти. Права администратора не нужны: помощник ставится в `%LOCALAPPDATA%\MLink` и регистрируется для Chrome, Chromium и Edge. Удаление — через «Параметры» → «Приложения».
+
+**Linux** (и macOS без установщика). Открой терминал, вставь команду и нажми Enter:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Mag1c3R/m-link/main/install.sh | sh
 ```
 
-**Windows.** Скачай [m-link-helper-windows-amd64.zip](../../releases/latest/download/m-link-helper-windows-amd64.zip), распакуй архив целиком и запусти `install.bat`.
+Расширение само показывает нужную кнопку для твоей системы и, пока его окно открыто, замечает установку без нажатия «Проверить». Если помощник не появился, перезапусти браузер.
 
-После установки открой расширение: карточка «Установи помощник» исчезнет после нажатия «Проверить». Если этого не произошло, перезапусти браузер.
+Установщики пока не подписаны сертификатом разработчика. macOS может отказаться открыть `.pkg`: тогда «Системные настройки» → «Конфиденциальность и безопасность» → «Всё равно открыть». Windows SmartScreen: «Подробнее» → «Выполнить в любом случае».
 
 <details>
-<summary>Установка из архива вручную (macOS, Linux)</summary>
+<summary>Установка из архива вручную</summary>
 
 Архивы лежат в [последнем релизе](../../releases/latest):
 
 - **macOS (Apple Silicon: M1–M4):** `m-link-helper-darwin-arm64.tar.gz`
 - **macOS (Intel):** `m-link-helper-darwin-amd64.tar.gz`
 - **Linux:** `m-link-helper-linux-amd64.tar.gz` или `m-link-helper-linux-arm64.tar.gz`
+- **Windows:** `m-link-helper-windows-amd64.zip` (распакуй целиком и запусти `install.bat`)
 
-Распакуй архив и запусти `install.command` (macOS, двойным щелчком) или `sh install.sh` (Linux). macOS может не дать открыть файл, скачанный браузером: тогда разреши запуск в «Системных настройках» → «Конфиденциальность и безопасность» или воспользуйся командой выше.
+Распакуй архив и запусти `install.command` (macOS, двойным щелчком) или `sh install.sh` (Linux).
 </details>
 
-Удаление: `uninstall.sh` или `uninstall.bat` из архива. Помощник не подписан сертификатом разработчика, поэтому Windows может показать предупреждение при запуске.
+Удаление на macOS и Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Mag1c3R/m-link/main/helper/install/uninstall.sh | sh
+```
 
 ## Что умеет
 
@@ -70,6 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/Mag1c3R/m-link/main/install.sh | sh
 | [extension/](extension) | Расширение MV3. Логика: [background.js](extension/background.js), разбор ссылок: [lib/parser.js](extension/lib/parser.js), конфиг sing-box и PAC: [lib/singbox.js](extension/lib/singbox.js), бренд и ссылки: [config.js](extension/config.js) |
 | [helper/](helper) | Помощник на Go без внешних зависимостей. Сборка: `sh helper/build.sh` → `helper/dist/` |
 | [helper/install/](helper/install) | Установщики из архива и список ID расширений [extension-ids.txt](helper/install/extension-ids.txt) |
+| [helper/installer/](helper/installer) | Исходники установщиков `.pkg` (macOS) и `.exe` (Windows, NSIS). Сборка: `sh helper/build-installers.sh` после `build.sh` |
 | [install.sh](install.sh) | Установка помощника одной командой: скачивает архив последнего релиза и запускает установщик |
 | [remote-config.json](remote-config.json) | Данные, которые расширение раз в сутки читает с GitHub: актуальная версия помощника и рекламный блок |
 | [tests/](tests) | `parser.test.html` — тесты парсера и PAC; `preview.html` — просмотр popup без Chrome; `e2e.html` — сквозной стенд с настоящим помощником |
@@ -93,7 +103,7 @@ curl -fsSL https://raw.githubusercontent.com/Mag1c3R/m-link/main/install.sh | sh
 
 **Расширение.** Подними `version` в [extension/manifest.json](extension/manifest.json), выполни `sh build-store.sh` и загрузи `dist/m-link-<версия>-store.zip` в кабинет разработчика Chrome Web Store. Скрипт убирает из манифеста поле `key`: магазин его не принимает.
 
-**Помощник.** Подними `version` в [helper/main.go](helper/main.go), собери архивы и выложи их в новый релиз на GitHub. Затем обнови `helper.latest` в [remote-config.json](remote-config.json): помощники 1.1+ обновятся сами, когда VPN выключен, старым расширение покажет инструкцию. Самообновление берёт архив из последнего релиза и проверяет его по контрольной сумме из API GitHub, поэтому архивы в релизе всегда должны называться `m-link-helper-<ос>-<архитектура>`. Если расширению нужна новая команда помощника, подними ещё `minHelper` в `config.js`, а новые возможности проверяй по списку `features` из команды `hello`.
+**Помощник.** Подними `version` в [helper/main.go](helper/main.go), собери архивы (`build.sh` с ядрами) и установщики (`build-installers.sh`, нужен `makensis`: `brew install makensis`) и выложи всё в новый релиз на GitHub. Установщики должны называться `M-Link-Helper-macOS-arm64.pkg`, `M-Link-Helper-macOS-intel.pkg` и `M-Link-Helper-Setup.exe`: на них ведёт кнопка в расширении. Затем обнови `helper.latest` в [remote-config.json](remote-config.json): помощники 1.1+ обновятся сами, когда VPN выключен, старым расширение покажет инструкцию. Самообновление берёт архив из последнего релиза и проверяет его по контрольной сумме из API GitHub, поэтому архивы в релизе всегда должны называться `m-link-helper-<ос>-<архитектура>`. Если расширению нужна новая команда помощника, подними ещё `minHelper` в `config.js`, а новые возможности проверяй по списку `features` из команды `hello`.
 
 **ID расширения.** Помощник отвечает только расширениям из [extension-ids.txt](helper/install/extension-ids.txt). ID из Chrome Web Store нужно добавить туда и пересобрать помощник.
 

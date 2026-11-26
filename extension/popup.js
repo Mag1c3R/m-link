@@ -169,43 +169,86 @@ function setupMode() {
   return null;
 }
 
-function archiveName() {
+// Установщик под систему: .pkg для macOS, .exe для Windows. Для Linux — команда для терминала.
+function installerName() {
   if (!platform) return null;
-  if (platform.os === 'win') return 'm-link-helper-windows-amd64.zip';
-  const arch = platform.arch === 'arm64' ? 'arm64' : platform.arch === 'x86-64' ? 'amd64' : null;
-  if (!arch) return null;
-  if (platform.os === 'mac') return `m-link-helper-darwin-${arch}.tar.gz`;
-  if (platform.os === 'linux') return `m-link-helper-linux-${arch}.tar.gz`;
+  if (platform.os === 'win') return 'M-Link-Helper-Setup.exe';
+  if (platform.os === 'mac') return platform.arch === 'arm64' ? 'M-Link-Helper-macOS-arm64.pkg' : 'M-Link-Helper-macOS-intel.pkg';
   return null;
 }
 
+function linuxArchive() {
+  const arch = platform?.arch === 'arm64' ? 'arm64' : platform?.arch === 'x86-64' ? 'amd64' : null;
+  return arch ? `m-link-helper-linux-${arch}.tar.gz` : null;
+}
+
+let showCommand = false;
+
+function commandBlock() {
+  return `<p>${t('Открой «Терминал», вставь команду и нажми Enter:')}</p>
+      <div class="cmd"><code id="install-cmd">${esc(BRAND.installCommand)}</code></div>`;
+}
+
 function installSteps() {
-  const file = archiveName();
-  const url = file ? `${BRAND.downloadBase}/${file}` : BRAND.releasesUrl;
-  if (platform?.os === 'win') {
-    return `<ol class="steps">
-        <li>${t('Скачай архив и распакуй его целиком')}</li>
-        <li>${t('Запусти <b>install.bat</b> из распакованной папки')}</li>
-      </ol>
+  const checkBtn = `<button class="btn small" data-check>${t('Проверить')}</button>`;
+  const file = installerName();
+  if (file) {
+    const url = `${BRAND.downloadBase}/${file}`;
+    const win = platform.os === 'win';
+    const waiting = installPoll ? `<p class="hint wait">${t('Жду, когда помощник установится…')}</p>` : '';
+    const steps = win
+      ? `<li>${t('Скачай и запусти установщик')}</li>
+         <li>${t('Если Windows предупредит о неизвестном издателе: «Подробнее» → «Выполнить в любом случае»')}</li>`
+      : `<li>${t('Скачай и открой установщик')}</li>
+         <li>${t('Если macOS не даёт его открыть: «Системные настройки» → «Конфиденциальность и безопасность» → «Всё равно открыть»')}</li>`;
+    const alt = !win && showCommand
+      ? commandBlock() + `<div class="actions"><button class="btn small" data-copy>${t('Скопировать команду')}</button></div>`
+      : '';
+    return `<ol class="steps">${steps}</ol>${waiting}
       <div class="actions">
-        <a class="btn primary small" href="${esc(url)}" target="_blank" rel="noopener">${t('Скачать для Windows')}</a>
-        <button class="btn small" data-check>${t('Проверить')}</button>
-      </div>`;
+        <a class="btn primary small" href="${esc(url)}" target="_blank" rel="noopener" data-download>${t('Скачать установщик')}</a>
+        ${checkBtn}
+        ${!win && !showCommand ? `<button class="link" data-show-cmd>${t('или через Терминал')}</button>` : ''}
+      </div>${alt}`;
   }
-  if (platform?.os === 'mac' || platform?.os === 'linux') {
-    return `<p>${t('Открой «Терминал», вставь команду и нажми Enter:')}</p>
-      <div class="cmd"><code id="install-cmd">${esc(BRAND.installCommand)}</code></div>
+  if (platform?.os === 'linux') {
+    const arc = linuxArchive();
+    return `${commandBlock()}
       <div class="actions">
         <button class="btn primary small" data-copy>${t('Скопировать команду')}</button>
-        <button class="btn small" data-check>${t('Проверить')}</button>
-        ${file ? `<a class="link" href="${esc(url)}" target="_blank" rel="noopener">${t('или скачать архив')}</a>` : ''}
+        ${checkBtn}
+        ${arc ? `<a class="link" href="${esc(`${BRAND.downloadBase}/${arc}`)}" target="_blank" rel="noopener">${t('или скачать архив')}</a>` : ''}
       </div>`;
   }
   return `<p>${t('Помощник есть для Windows, macOS и Linux.')}</p>
     <div class="actions">
       <a class="btn primary small" href="${esc(BRAND.releasesUrl)}" target="_blank" rel="noopener">${t('Открыть страницу загрузки')}</a>
-      <button class="btn small" data-check>${t('Проверить')}</button>
+      ${checkBtn}
     </div>`;
+}
+
+// После нажатия «Скачать» тихо проверяем помощника каждые 3 секунды, пока окно открыто,
+// чтобы карточка исчезла сама, как только установщик закончит. Не дольше 15 минут.
+let installPoll = null;
+function startInstallPoll() {
+  if (installPoll) return;
+  const until = Date.now() + 15 * 60 * 1000;
+  installPoll = setInterval(async () => {
+    if (Date.now() > until) { stopInstallPoll(); renderSetup(); return; }
+    let h;
+    try { h = await send('helperInfo'); } catch { return; }
+    if (!h.installed) return;
+    stopInstallPoll();
+    helper = h;
+    renderSetup();
+    renderHero();
+    renderHelperBox();
+    if (!h.outdated && !h.coreError) toast(t('Помощник установлен и работает'));
+  }, 3000);
+}
+function stopInstallPoll() {
+  clearInterval(installPoll);
+  installPoll = null;
 }
 
 // Помощник 1.1+ обновляется сам: вместо инструкции показываем одну кнопку.
@@ -937,9 +980,16 @@ $('reminder').addEventListener('click', (e) => {
 });
 
 $('setup').addEventListener('click', async (e) => {
-  const el = e.target.closest('[data-copy],[data-check],[data-dismiss],[data-dismiss-feature],[data-self-update]');
+  const el = e.target.closest('[data-copy],[data-check],[data-dismiss],[data-dismiss-feature],[data-self-update],[data-download],[data-show-cmd]');
   if (!el) return;
-  if (el.dataset.copy !== undefined) {
+  if (el.dataset.download !== undefined) {
+    // Ссылка открывает загрузку сама, а мы начинаем ждать помощника.
+    startInstallPoll();
+    renderSetup();
+  } else if (el.dataset.showCmd !== undefined) {
+    showCommand = true;
+    renderSetup();
+  } else if (el.dataset.copy !== undefined) {
     try {
       await navigator.clipboard.writeText(BRAND.installCommand);
       toast(t('Команда скопирована. Вставь её в Терминал.'));

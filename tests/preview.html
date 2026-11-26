@@ -88,10 +88,10 @@ window.chrome = {
   i18n: { getUILanguage: () => q.get('ui') || 'ru' },
   runtime: {
     getManifest: () => ({ version: '1.4.0' }),
-    getPlatformInfo: async () => ({ os: q.get('os') || 'mac', arch: 'arm64' }),
+    getPlatformInfo: async () => ({ os: q.get('os') || 'mac', arch: q.get('arch') || 'arm64' }),
     sendMessage: async (m) => (m.type === 'stats' ? fakeStats()
       : m.type === 'checkUpdates' ? { ok: true, ext: q.get('extupdate') ? 'update_available' : 'no_update', extVersion: q.get('extupdate') ? '1.5.0' : null, helper: { current: '1.3.0', latest: '1.3.0', updateAvailable: false } }
-      : m.type === 'helperInfo' ? (q.get('nohelper') ? noHelper : helperOk)
+      : m.type === 'helperInfo' ? (q.get('nohelper') && !window.__installed ? noHelper : helperOk)
       : q.get('nohelper') && ['test', 'connect', 'add', 'updateAll'].includes(m.type)
         ? { ok: false, code: 'no_helper', error: 'Помощник не установлен.' }
         : { ok: true, added: 0, tested: 0 }),

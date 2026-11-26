@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>M-Link Helper</title>
+  <organization>com.mlink</organization>
+  <options customize="never" require-scripts="true" hostArchitectures="__ARCH__"/>
+  <domains enable_currentUserHome="false" enable_localSystem="true"/>
+  <welcome file="welcome.html" mime-type="text/html"/>
+  <conclusion file="conclusion.html" mime-type="text/html"/>
+  <choices-outline>
+    <line choice="helper"/>
+  </choices-outline>
+  <choice id="helper" visible="false">
+    <pkg-ref id="com.mlink.helper"/>
+  </choice>
+  <pkg-ref id="com.mlink.helper" version="__VERSION__" onConclusion="none">helper.pkg</pkg-ref>
+</installer-gui-script>

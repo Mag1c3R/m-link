@@ -1,0 +1,20 @@
+#!/bin/sh
+# Запускается установщиком macOS (.pkg) от имени администратора после копирования файлов.
+# Помощник ставится в папку пользователя, а не в системную: так он может обновляться сам,
+# без пароля администратора. Поэтому дальше работаем от имени вошедшего пользователя.
+set -eu
+DIR="$(cd "$(dirname "$0")" && pwd)"
+USER_NAME="$(stat -f%Su /dev/console)"
+if [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; then
+  echo "Не удалось определить пользователя" >&2
+  exit 1
+fi
+USER_HOME="$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory | awk '{print $2}')"
+# Копируем файлы во временную папку, доступную пользователю, и запускаем обычный установщик.
+TMP="$(mktemp -d /tmp/mlink-install.XXXXXX)"
+trap 'rm -rf "${TMP:?}"' EXIT
+cp -R "$DIR/payload/." "$TMP/"
+rm -f "$TMP"/._*
+chown -R "$USER_NAME" "$TMP"
+sudo -u "$USER_NAME" HOME="$USER_HOME" /bin/sh "$TMP/install.sh"
+exit 0
