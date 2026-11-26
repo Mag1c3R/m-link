@@ -699,6 +699,8 @@ function fillSettings() {
   $('auto-switch').checked = s.autoSwitch !== false;
   $('hide-dead').checked = s.hideDead !== false;
   $('quick-ping').checked = s.quickPing !== false;
+  $('send-hwid').checked = s.sendHwid !== false;
+  loadDevice();
   $('lang').value = s.lang || 'auto';
   renderRules();
   $('about').innerHTML = `${esc(BRAND.name)} ${esc(VERSION)} · <a href="${esc(BRAND.repoUrl)}" target="_blank" rel="noopener">${t('Исходный код')}</a> · <a href="${esc(BRAND.repoUrl)}/blob/main/PRIVACY.md" target="_blank" rel="noopener">${t('Конфиденциальность')}</a>`;
@@ -931,6 +933,24 @@ $('setup').addEventListener('click', async (e) => {
   }
 });
 
+async function loadDevice() {
+  try {
+    const d = await send('device');
+    $('hwid').textContent = d.hwid;
+    $('hwid').title = [d.os, d.ver, d.model].filter(Boolean).join(' · ');
+    if (d.helperSupports === false) $('hwid-hint').textContent = t('Чтобы панель получала HWID, обнови помощник.');
+  } catch { /* без HWID настройки всё равно работают */ }
+}
+
+$('copy-hwid').addEventListener('click', async () => {
+  try {
+    await copyText($('hwid').textContent);
+    toast(t('HWID скопирован'));
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
 $('copy-report').addEventListener('click', (e) => busy(e.currentTarget, async () => {
   const r = await send('diag');
   await copyText(r.text);
@@ -969,6 +989,7 @@ $('save-settings').addEventListener('click', async () => {
         autoSwitch: $('auto-switch').checked,
         hideDead: $('hide-dead').checked,
         quickPing: $('quick-ping').checked,
+        sendHwid: $('send-hwid').checked,
         lang: $('lang').value,
       },
     });
@@ -987,7 +1008,7 @@ function withDefaults(settings) {
   return {
     mode: 'except', exceptList: '', onlyList: '', port: 10808, updateHours: 12, userAgent: DEFAULT_UA,
     sortByPing: true, showUnsupported: false, webrtcProtect: true, killSwitch: false, lang: 'auto', siteRules: {},
-    autoSwitch: true, hideDead: true, quickPing: true,
+    autoSwitch: true, hideDead: true, quickPing: true, sendHwid: true,
     ...settings,
   };
 }

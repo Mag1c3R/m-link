@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS = {
   autoSwitch: true, // если сервер перестал отвечать, переключаться на следующий по пингу
   hideDead: true, // после замера скрывать серверы, которые не ответили
   quickPing: true, // при открытии popup обновлять пинг лучших серверов
+  sendHwid: true, // передавать панели идентификатор устройства (HWID), как Happ
   lang: 'auto', // auto | ru | en
 };
 
@@ -549,10 +550,57 @@ function statusMessage(status) {
   return t('Сервер подписки ответил {0}', status);
 }
 
+// ---------- идентификатор устройства (HWID) ----------
+// Случайные 16 символов, как у Happ. Создаётся один раз при первой загрузке подписки и не связан
+// с компьютером: после переустановки расширения будет новый. По нему панель видит отдельное устройство.
+
+async function getHwid() {
+  const { hwid } = await chrome.storage.local.get({ hwid: '' });
+  if (/^[a-z0-9]{16}$/.test(hwid)) return hwid;
+  const abc = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const id = Array.from(bytes, (b) => abc[b % abc.length]).join('');
+  await chrome.storage.local.set({ hwid: id });
+  return id;
+}
+
+let deviceCache = null;
+
+// Система, её версия и «модель» для панели: например macOS · 15 · M-Link (Chrome 142).
+async function deviceInfo() {
+  if (deviceCache) return deviceCache;
+  const names = { mac: 'macOS', win: 'Windows', linux: 'Linux', cros: 'ChromeOS', android: 'Android', openbsd: 'OpenBSD' };
+  let os = '';
+  try { os = names[(await chrome.runtime.getPlatformInfo()).os] || ''; } catch { /* неважно */ }
+  let ver = '';
+  let browser = '';
+  try {
+    const ua = navigator.userAgentData;
+    const hi = await ua?.getHighEntropyValues?.(['platformVersion']);
+    ver = String(hi?.platformVersion || '').split('.')[0];
+    // На Windows 11 platformVersion начинается с 13 и выше, на Windows 10 — меньше.
+    if (os === 'Windows' && ver) ver = Number(ver) >= 13 ? '11' : '10';
+    const brands = (ua?.brands || []).filter((b) => !/not.?a.?brand/i.test(b.brand));
+    // Сначала конкретный браузер (Google Chrome, Edge, Yandex), иначе Chromium.
+    const brand = brands.find((b) => !/chromium/i.test(b.brand)) || brands[0];
+    browser = brand ? `${brand.brand} ${brand.version}` : '';
+  } catch { /* старый Chrome — без версии */ }
+  deviceCache = { os, ver, model: `${BRAND.name}${browser ? ` (${browser})` : ''}` };
+  return deviceCache;
+}
+
+async function deviceHeaders(settings) {
+  if (!settings.sendHwid) return {};
+  const d = await deviceInfo();
+  const h = { 'x-hwid': await getHwid(), 'x-device-os': d.os, 'x-ver-os': d.ver, 'x-device-model': d.model };
+  return Object.fromEntries(Object.entries(h).filter(([, v]) => v));
+}
+
 async function fetchSubscription(url, settings) {
   let res;
+  const headers = await deviceHeaders(settings);
   try {
-    res = await withHelper(() => callHelper('fetch', { url, userAgent: settings.userAgent || DEFAULT_UA }, 40000));
+    res = await withHelper(() => callHelper('fetch', { url, userAgent: settings.userAgent || DEFAULT_UA, headers }, 40000));
   } catch (e) {
     throw helperError(e, 'fetch');
   }
@@ -871,6 +919,7 @@ async function saveSettings(patch) {
   settings.autoSwitch = !!settings.autoSwitch;
   settings.hideDead = !!settings.hideDead;
   settings.quickPing = !!settings.quickPing;
+  settings.sendHwid = !!settings.sendHwid;
   settings.siteRules = normalizeRules(settings.siteRules);
   if (!['auto', 'ru', 'en'].includes(settings.lang)) settings.lang = 'auto';
   if (!['all', 'except', 'only'].includes(settings.mode)) settings.mode = DEFAULT_SETTINGS.mode;
@@ -1038,7 +1087,7 @@ async function diagReport() {
     `Состояние: ${status.state}${status.code ? ` (${status.code})` : ''}${status.error ? ` — ${status.error}` : ''}${status.detail ? ` — ${status.detail}` : ''}`,
     `Сервер: ${node ? `${node.label || node.type}, ядро ${node.core || 'sing-box'}${node.members ? `, группа из ${node.members.length}` : ''}` : 'не выбран'}`,
     `Режим: ${s.mode} · правил для сайтов: ${Object.keys(s.siteRules || {}).length} · порт ${s.port}`,
-    `WebRTC-защита: ${s.webrtcProtect ? 'вкл' : 'выкл'} · kill switch: ${s.killSwitch ? 'вкл' : 'выкл'} · автозамена: ${s.autoSwitch ? 'вкл' : 'выкл'}`,
+    `WebRTC-защита: ${s.webrtcProtect ? 'вкл' : 'выкл'} · kill switch: ${s.killSwitch ? 'вкл' : 'выкл'} · автозамена: ${s.autoSwitch ? 'вкл' : 'выкл'} · HWID: ${s.sendHwid ? 'отправляется' : 'выкл'}`,
     ...state.subs.map((sub, i) => {
       const ns = sub.nodes || [];
       return `Подписка ${i + 1}: серверов ${ns.filter(usable).length}, через xray ${ns.filter((n) => n.core === 'xray').length}, не поддерж. ${ns.filter((n) => n.unsupported).length}, сообщений ${ns.filter((n) => n.info).length}, обновлена ${ago(sub.updatedAt)}${sub.error ? `, ошибка: ${sub.error}` : ''}`;
@@ -1104,6 +1153,10 @@ const handlers = {
   // Popup открыли: обновляем пинг лучших серверов, не задерживая ответ.
   quickTest: () => { quickTest().catch(() => {}); return {}; },
   diag: () => diagReport(),
+  device: async () => {
+    const c = caps; // если помощник уже опрашивали, знаем, умеет ли он передавать заголовки
+    return { hwid: await getHwid(), ...(await deviceInfo()), helperSupports: c ? c.features.has('headers') : null };
+  },
   saveSettings: (m) => saveSettings(m.settings),
   setSiteRule: (m) => setSiteRule(m.domain, m.route),
   helperInfo: () => helperInfo(),

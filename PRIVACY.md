@@ -1,6 +1,6 @@
 # Политика конфиденциальности M-Link
 
-_Обновлено: 16 ноября 2026 г._ · [English version below](#m-link-privacy-policy)
+_Обновлено: 26 ноября 2026 г._ · [English version below](#m-link-privacy-policy)
 
 M-Link — это расширение для браузера и программа-помощник, которые подключают браузер к прокси-серверам пользователя. Мы не собираем и не получаем никаких данных пользователей.
 
@@ -21,6 +21,7 @@ M-Link — это расширение для браузера и програм
 ## Какие сетевые запросы выполняются
 
 - **Скачивание подписок** по ссылкам, которые добавил ты сам, у твоего поставщика подписки. Запрос выполняет помощник и передаёт заголовок `User-Agent: M-Link/<версия>`. Самому расширению доступ к сайтам не нужен.
+- **Идентификатор устройства (HWID):** вместе с запросом подписки помощник передаёт твоему поставщику подписки случайный идентификатор этой установки расширения (16 символов), название системы, её версию и браузер — так же, как это делают другие VPN-клиенты. По нему сервис отличает твои устройства и применяет их лимит. Идентификатор не связан с компьютером и меняется при переустановке расширения. Передачу можно выключить в настройках.
 - **Служебный файл с GitHub** раз в сутки: `remote-config.json` из репозитория проекта. В нём номер актуальной версии помощника и текст рекламного блока. Запрос не содержит никаких данных о тебе, но GitHub, как любой сайт, видит IP-адрес.
 - **Трафик браузера** идёт через выбранный тобой сервер, а при режиме «все, кроме списка» или «только список» — напрямую для указанных сайтов. Что видит и хранит сервер, определяет его владелец, а не M-Link.
 - **Замер пинга:** запрос к `https://www.gstatic.com/generate_204` через каждый проверяемый сервер. Тот же запрос раз в минуту идёт через подключённый сервер, чтобы заметить, что он перестал отвечать (автозамену можно выключить в настройках).
@@ -50,7 +51,7 @@ M-Link — это расширение для браузера и програм
 
 # M-Link Privacy Policy
 
-_Last updated: November 16, 2026_
+_Last updated: November 26, 2026_
 
 M-Link is a browser extension and a companion helper app that connect the browser to the user's own proxy servers. We do not collect or receive any user data.
 
@@ -71,6 +72,7 @@ Neither the extension nor the helper sends **anything** to the developer: no bro
 ## Network requests
 
 - **Subscription download** from the links the user added, sent to the user's subscription provider. The request is made by the helper app with the header `User-Agent: M-Link/<version>`. The extension itself has no access to websites.
+- **Device ID (HWID):** along with the subscription request, the helper sends the user's subscription provider a random identifier of this extension install (16 characters), the system name, its version and the browser, as other VPN clients do. The service uses it to tell the user's devices apart and apply its device limit. The identifier is not tied to the computer and changes when the extension is reinstalled. Sending it can be turned off in settings.
 - **A config file from GitHub** once a day: `remote-config.json` from the project repository. It contains the current helper version and the text of the promo block. The request carries no user data, but GitHub, like any website, sees the IP address.
 - **Browser traffic** goes through the server selected by the user, or directly for sites excluded by the user's rules. What a server sees or logs is determined by its operator, not by M-Link.
 - **Latency test:** a request to `https://www.gstatic.com/generate_204` through each server being tested. The same request is made once a minute through the connected server to notice when it stops responding (auto-switch can be turned off in settings).

@@ -210,5 +210,11 @@ export default {
   "Авто": "Auto",
   "Тема": "Theme",
   "Тема как в системе": "Same theme as the system",
-  "Светлая или тёмная тема": "Light or dark theme"
+  "Светлая или тёмная тема": "Light or dark theme",
+  "Идентификатор устройства (HWID)": "Device ID (HWID)",
+  "Скопировать": "Copy",
+  "Передавать HWID и систему панели подписки": "Send the HWID and system to the subscription panel",
+  "По нему сервис видит это расширение как отдельное устройство. Назови его поддержке, если нужно сбросить устройство.": "The service sees this extension as a separate device by it. Tell it to support if the device needs to be reset.",
+  "Чтобы панель получала HWID, обнови помощник.": "Update the helper so the panel receives the HWID.",
+  "HWID скопирован": "HWID copied"
 };

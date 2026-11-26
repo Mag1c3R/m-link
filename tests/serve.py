@@ -118,6 +118,7 @@ class H(http.server.SimpleHTTPRequestHandler):
         path = self.path.split('?')[0]
         if path == '/fake-sub':
             state['ua'] = self.headers.get('User-Agent', '')
+            state['headers'] = {k.lower(): v for k, v in self.headers.items() if k.lower().startswith('x-')}
             p = os.path.join(outdir, 'sub.txt')
             data = open(p, 'rb').read() if os.path.exists(p) else SMALL_SUB
             data = FROZEN.get(state['frozen'], data)
@@ -127,6 +128,8 @@ class H(http.server.SimpleHTTPRequestHandler):
                 ('Profile-Update-Interval', '3'),
                 ('Announce', 'base64:' + base64.b64encode('⚠️ Тестовое объявление панели'.encode()).decode()),
             ])
+        if path == '/fake-sub-headers':
+            return self.reply(200, json.dumps(state.get('headers', {})).encode())
         if path == '/fake-sub-ua':
             return self.reply(200, state['ua'].encode(), 'text/plain; charset=utf-8')
         m = re.fullmatch(r'/native/(\d+)/recv', path)

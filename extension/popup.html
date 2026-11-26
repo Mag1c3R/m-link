@@ -132,6 +132,16 @@
           <label class="check"><input type="checkbox" id="show-unsupported"> <span>Показывать неподдерживаемые узлы</span></label>
         </div>
 
+        <div class="field">
+          <span class="label">Идентификатор устройства (HWID)</span>
+          <div class="hwid-row">
+            <code id="hwid">…</code>
+            <button class="btn small" id="copy-hwid" type="button">Скопировать</button>
+          </div>
+          <label class="check"><input type="checkbox" id="send-hwid"> <span>Передавать HWID и систему панели подписки</span></label>
+          <span class="hint" id="hwid-hint">По нему сервис видит это расширение как отдельное устройство. Назови его поддержке, если нужно сбросить устройство.</span>
+        </div>
+
         <label class="field">
           <span class="label">User-Agent для подписок</span>
           <input id="user-agent" type="text" spellcheck="false">
